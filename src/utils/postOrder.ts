@@ -64,7 +64,7 @@ const isInsufficientBalanceOrAllowanceError = (message: string | undefined): boo
 };
 
 const postOrder = async (
-    clobClient: ClobClient,
+    clobClient: ClobClient | null,
     condition: string,
     my_position: UserPositionInterface | undefined,
     user_position: UserPositionInterface | undefined,
@@ -74,6 +74,28 @@ const postOrder = async (
     userAddress: string
 ) => {
     const UserActivity = getUserActivityModel(userAddress);
+
+    // Paper / preview mode: log the signal and mark processed — never place orders
+    if (ENV.PAPER_MODE || !clobClient) {
+        // Use virtual balance so size calc isn't zeroed when no wallet is configured
+        const paperBalance = my_balance > 0 ? my_balance : 10_000;
+        const orderSize = calculateOrderSize(
+            COPY_STRATEGY_CONFIG,
+            trade.usdcSize,
+            paperBalance,
+            my_position?.currentValue || 0
+        );
+        Logger.warning(
+            `[PAPER] Would ${condition.toUpperCase()} ` +
+                `${trade.outcome || trade.asset.slice(0, 12)}… ` +
+                `~$${orderSize.finalAmount.toFixed(2)} ` +
+                `@ ${trade.price} on ${trade.slug || trade.eventSlug || 'market'} ` +
+                `(from ${userAddress.slice(0, 6)}…${userAddress.slice(-4)}) — ${orderSize.reasoning}`
+        );
+        await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+        return;
+    }
+
     //Merge strategy
     if (condition === 'merge') {
         Logger.info('Executing MERGE strategy...');

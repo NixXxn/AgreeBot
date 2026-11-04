@@ -158,7 +158,11 @@ class Logger {
             console.log(chalk.gray(`   ${index + 1}. ${address}`));
         });
         console.log(chalk.cyan(`\n💼 Your Wallet:`));
-        console.log(chalk.gray(`   ${this.maskAddress(myWallet)}\n`));
+        if (!myWallet) {
+            console.log(chalk.yellow(`   (none — paper mode)\n`));
+        } else {
+            console.log(chalk.gray(`   ${this.maskAddress(myWallet)}\n`));
+        }
     }
 
     static dbConnection(traders: string[], counts: number[]) {

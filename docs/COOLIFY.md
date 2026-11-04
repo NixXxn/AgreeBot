@@ -42,7 +42,19 @@ In the Coolify app → **Environment Variables**, set at least:
 Bad: `PROXY_WALLET=''` or `PROXY_WALLET='0xabc…'`  
 Good: `PROXY_WALLET=0xabc…`
 
-If logs show `Invalid PROXY_WALLET address format: ''`, the variable is empty or still has quote characters — set your real wallet and redeploy.
+### Paper mode (no wallet)
+
+To monitor traders and log signals without trading:
+
+```bash
+PAPER_MODE=true
+USER_ADDRESSES=0xTrader1,0xTrader2,...
+MONGO_URI=mongodb+srv://...
+CONSENSUS_ENABLED=true   # optional
+CONSENSUS_MIN_AGREEMENT=2
+```
+
+`PROXY_WALLET` and `PRIVATE_KEY` are **not required**. Logs will show `[PAPER] Would BUY/SELL …` instead of placing orders. Set `PAPER_MODE=false` and add wallet credentials when you go live.
 
 ### Consensus (recommended for AgreeBot)
 

@@ -19,6 +19,7 @@ export const startHealthServer = (): void => {
         if (url === '/health' || url === '/healthz' || url === '/') {
             const body = JSON.stringify({
                 status: 'ok',
+                mode: ENV.PAPER_MODE ? 'paper' : 'live',
                 uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
                 traders: ENV.USER_ADDRESSES.length,
                 consensus: {

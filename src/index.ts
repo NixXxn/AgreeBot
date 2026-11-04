@@ -7,6 +7,7 @@ import autoResolver, { stopAutoResolver } from './services/autoResolver';
 import { startHealthServer, stopHealthServer } from './services/healthServer';
 import Logger from './utils/logger';
 import { performHealthCheck, logHealthCheck } from './utils/healthCheck';
+import { ClobClient } from '@polymarket/clob-client';
 
 const USER_ADDRESSES = ENV.USER_ADDRESSES;
 const PROXY_WALLET = ENV.PROXY_WALLET;
@@ -70,6 +71,12 @@ export const main = async () => {
         await connectDB();
         Logger.startup(USER_ADDRESSES, PROXY_WALLET);
 
+        if (ENV.PAPER_MODE) {
+            Logger.warning(
+                'PAPER MODE enabled — monitoring traders and logging signals only (no live orders)'
+            );
+        }
+
         if (ENV.CONSENSUS_ENABLED) {
             Logger.info(
                 `Consensus trading enabled: ${ENV.CONSENSUS_MIN_AGREEMENT}+ of ${USER_ADDRESSES.length} traders must agree`
@@ -88,9 +95,14 @@ export const main = async () => {
             Logger.warning('Health check failed, but continuing startup...');
         }
 
-        Logger.info('Initializing CLOB client...');
-        const clobClient = await createClobClient();
-        Logger.success('CLOB client ready');
+        let clobClient: ClobClient | null = null;
+        if (ENV.PAPER_MODE) {
+            Logger.info('Skipping CLOB client (paper mode — no private key required)');
+        } else {
+            Logger.info('Initializing CLOB client...');
+            clobClient = await createClobClient();
+            Logger.success('CLOB client ready');
+        }
 
         Logger.separator();
         Logger.info('Starting trade monitor...');
@@ -99,8 +111,12 @@ export const main = async () => {
         Logger.info('Starting trade executor...');
         tradeExecutor(clobClient);
 
-        Logger.info('Starting auto resolver...');
-        autoResolver(clobClient);
+        if (!ENV.PAPER_MODE && ENV.AUTO_RESOLVE_ENABLED && clobClient) {
+            Logger.info('Starting auto resolver...');
+            autoResolver(clobClient);
+        } else if (ENV.PAPER_MODE) {
+            Logger.info('Auto resolver skipped (paper mode)');
+        }
     } catch (error) {
         Logger.error(`Fatal error during startup: ${error}`);
         await gracefulShutdown('startup-error');

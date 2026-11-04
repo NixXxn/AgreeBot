@@ -56,6 +56,27 @@ const normalizeEnvValues = (): void => {
 
 normalizeEnvValues();
 
+/** Paper / preview mode: monitor & simulate only — no wallet or live orders required */
+const isTruthyEnv = (value: string | undefined): boolean =>
+    ['true', '1', 'yes', 'on'].includes((value || '').toLowerCase());
+
+const PAPER_MODE_ENABLED =
+    isTruthyEnv(process.env.PAPER_MODE) || isTruthyEnv(process.env.PREVIEW_MODE);
+
+// Sensible defaults so paper mode can start with only USER_ADDRESSES + MONGO_URI
+if (!process.env.CLOB_HTTP_URL) {
+    process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
+}
+if (!process.env.CLOB_WS_URL) {
+    process.env.CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws';
+}
+if (!process.env.USDC_CONTRACT_ADDRESS) {
+    process.env.USDC_CONTRACT_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+}
+if (PAPER_MODE_ENABLED && !process.env.RPC_URL) {
+    process.env.RPC_URL = 'https://polygon-rpc.com';
+}
+
 /**
  * Validate Ethereum address format
  */
@@ -67,16 +88,19 @@ const isValidEthereumAddress = (address: string): boolean => {
  * Validate required environment variables
  */
 const validateRequiredEnv = (): void => {
-    const required = [
-        'USER_ADDRESSES',
-        'PROXY_WALLET',
-        'PRIVATE_KEY',
-        'CLOB_HTTP_URL',
-        'CLOB_WS_URL',
-        'MONGO_URI',
-        'RPC_URL',
-        'USDC_CONTRACT_ADDRESS',
-    ];
+    // Live trading needs a funded wallet. Paper mode only needs traders + MongoDB.
+    const required = PAPER_MODE_ENABLED
+        ? ['USER_ADDRESSES', 'MONGO_URI']
+        : [
+              'USER_ADDRESSES',
+              'PROXY_WALLET',
+              'PRIVATE_KEY',
+              'CLOB_HTTP_URL',
+              'CLOB_WS_URL',
+              'MONGO_URI',
+              'RPC_URL',
+              'USDC_CONTRACT_ADDRESS',
+          ];
 
     const missing: string[] = [];
     for (const key of required) {
@@ -87,10 +111,13 @@ const validateRequiredEnv = (): void => {
     }
 
     if (missing.length > 0) {
+        const paperHint = PAPER_MODE_ENABLED
+            ? `Paper mode is ON — only USER_ADDRESSES and MONGO_URI are required.\n`
+            : `For paper/preview without a wallet, set PAPER_MODE=true (or PREVIEW_MODE=true).\n` +
+              `Otherwise set PROXY_WALLET + PRIVATE_KEY for live trading.\n`;
         throw new Error(
             `Missing required environment variables: ${missing.join(', ')}\n` +
-                `Set these in Coolify → Environment Variables (or your .env file).\n` +
-                `Do not leave PROXY_WALLET / PRIVATE_KEY empty — use your real Polygon wallet.\n` +
+                paperHint +
                 `See .env.example and docs/COOLIFY.md.`
         );
     }
@@ -356,10 +383,14 @@ const parseCopyStrategy = (): CopyStrategyConfig => {
 
 export const ENV = {
     USER_ADDRESSES: parseUserAddresses(process.env.USER_ADDRESSES as string),
-    PROXY_WALLET: process.env.PROXY_WALLET as string,
-    PRIVATE_KEY: process.env.PRIVATE_KEY as string,
+    PROXY_WALLET: (process.env.PROXY_WALLET || '') as string,
+    PRIVATE_KEY: (process.env.PRIVATE_KEY || '') as string,
     CLOB_HTTP_URL: process.env.CLOB_HTTP_URL as string,
     CLOB_WS_URL: process.env.CLOB_WS_URL as string,
+    /** Monitor/simulate only — wallet + private key optional */
+    PAPER_MODE: PAPER_MODE_ENABLED,
+    /** Alias of PAPER_MODE (legacy name) */
+    PREVIEW_MODE: PAPER_MODE_ENABLED,
     FETCH_INTERVAL: parseInt(process.env.FETCH_INTERVAL || '1', 10),
     TOO_OLD_TIMESTAMP: parseInt(process.env.TOO_OLD_TIMESTAMP || '24', 10),
     RETRY_LIMIT: parseInt(process.env.RETRY_LIMIT || '3', 10),

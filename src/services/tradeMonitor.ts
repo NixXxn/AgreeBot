@@ -27,51 +27,55 @@ const init = async () => {
     Logger.clearLine();
     Logger.dbConnection(USER_ADDRESSES, counts);
 
-    // Show your own positions first
-    try {
-        const myPositionsUrl = `https://data-api.polymarket.com/positions?user=${ENV.PROXY_WALLET}`;
-        const myPositions = await fetchData(myPositionsUrl);
+    // Show your own positions first (skipped in paper mode without a wallet)
+    if (ENV.PROXY_WALLET) {
+        try {
+            const myPositionsUrl = `https://data-api.polymarket.com/positions?user=${ENV.PROXY_WALLET}`;
+            const myPositions = await fetchData(myPositionsUrl);
 
-        // Get current USDC balance
-        const getMyBalance = (await import('../utils/getMyBalance')).default;
-        const currentBalance = await getMyBalance(ENV.PROXY_WALLET);
+            // Get current USDC balance
+            const getMyBalance = (await import('../utils/getMyBalance')).default;
+            const currentBalance = await getMyBalance(ENV.PROXY_WALLET);
 
-        if (Array.isArray(myPositions) && myPositions.length > 0) {
-            // Calculate your overall profitability and initial investment
-            let totalValue = 0;
-            let initialValue = 0;
-            let weightedPnl = 0;
-            myPositions.forEach((pos: any) => {
-                const value = pos.currentValue || 0;
-                const initial = pos.initialValue || 0;
-                const pnl = pos.percentPnl || 0;
-                totalValue += value;
-                initialValue += initial;
-                weightedPnl += value * pnl;
-            });
-            const myOverallPnl = totalValue > 0 ? weightedPnl / totalValue : 0;
+            if (Array.isArray(myPositions) && myPositions.length > 0) {
+                // Calculate your overall profitability and initial investment
+                let totalValue = 0;
+                let initialValue = 0;
+                let weightedPnl = 0;
+                myPositions.forEach((pos: any) => {
+                    const value = pos.currentValue || 0;
+                    const initial = pos.initialValue || 0;
+                    const pnl = pos.percentPnl || 0;
+                    totalValue += value;
+                    initialValue += initial;
+                    weightedPnl += value * pnl;
+                });
+                const myOverallPnl = totalValue > 0 ? weightedPnl / totalValue : 0;
 
-            // Get top 5 positions by profitability (PnL)
-            const myTopPositions = myPositions
-                .sort((a: any, b: any) => (b.percentPnl || 0) - (a.percentPnl || 0))
-                .slice(0, 5);
+                // Get top 5 positions by profitability (PnL)
+                const myTopPositions = myPositions
+                    .sort((a: any, b: any) => (b.percentPnl || 0) - (a.percentPnl || 0))
+                    .slice(0, 5);
 
-            Logger.clearLine();
-            Logger.myPositions(
-                ENV.PROXY_WALLET,
-                myPositions.length,
-                myTopPositions,
-                myOverallPnl,
-                totalValue,
-                initialValue,
-                currentBalance
-            );
-        } else {
-            Logger.clearLine();
-            Logger.myPositions(ENV.PROXY_WALLET, 0, [], 0, 0, 0, currentBalance);
+                Logger.clearLine();
+                Logger.myPositions(
+                    ENV.PROXY_WALLET,
+                    myPositions.length,
+                    myTopPositions,
+                    myOverallPnl,
+                    totalValue,
+                    initialValue,
+                    currentBalance
+                );
+            } else {
+                Logger.clearLine();
+                Logger.myPositions(ENV.PROXY_WALLET, 0, [], 0, 0, 0, currentBalance);
+            }
+        } catch (error) {
+            Logger.error(`Failed to fetch your positions: ${error}`);
         }
-    } catch (error) {
-        Logger.error(`Failed to fetch your positions: ${error}`);
+    } else {
+        Logger.info('No PROXY_WALLET set — skipping own position summary (paper mode)');
     }
 
     // Show current positions count with details for traders you're copying

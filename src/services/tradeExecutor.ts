@@ -148,7 +148,7 @@ const getReadyAggregatedTrades = (): AggregatedTrade[] => {
     return ready;
 };
 
-const doTrading = async (clobClient: ClobClient, trades: TradeWithUser[]) => {
+const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[]) => {
     for (const trade of trades) {
         // Mark trade as being processed immediately to prevent duplicate processing
         const UserActivity = getUserActivityModel(trade.userAddress);
@@ -164,30 +164,35 @@ const doTrading = async (clobClient: ClobClient, trades: TradeWithUser[]) => {
             transactionHash: trade.transactionHash,
         });
 
-        const my_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-        );
         const user_positions: UserPositionInterface[] = await fetchData(
             `https://data-api.polymarket.com/positions?user=${trade.userAddress}`
-        );
-        const my_position = my_positions.find(
-            (position: UserPositionInterface) => position.conditionId === trade.conditionId
         );
         const user_position = user_positions.find(
             (position: UserPositionInterface) => position.conditionId === trade.conditionId
         );
 
-        // Get USDC balance
-        const my_balance = await getMyBalance(PROXY_WALLET);
+        let my_position: UserPositionInterface | undefined;
+        let my_balance = 0;
+        if (PROXY_WALLET) {
+            const my_positions: UserPositionInterface[] = await fetchData(
+                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
+            );
+            my_position = my_positions.find(
+                (position: UserPositionInterface) => position.conditionId === trade.conditionId
+            );
+            my_balance = await getMyBalance(PROXY_WALLET);
+        }
 
         // Calculate trader's total portfolio value from positions
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        Logger.balance(my_balance, user_balance, trade.userAddress);
+        if (PROXY_WALLET) {
+            Logger.balance(my_balance, user_balance, trade.userAddress);
+        }
 
-        // Execute the trade
+        // Execute the trade (or paper-log)
         await postOrder(
             clobClient,
             trade.side === 'BUY' ? 'buy' : 'sell',
@@ -206,7 +211,10 @@ const doTrading = async (clobClient: ClobClient, trades: TradeWithUser[]) => {
 /**
  * Execute a single consensus trade (one order after N traders agree).
  */
-const doConsensusTrading = async (clobClient: ClobClient, readyList: ConsensusReadyTrade[]) => {
+const doConsensusTrading = async (
+    clobClient: ClobClient | null,
+    readyList: ConsensusReadyTrade[]
+) => {
     for (const ready of readyList) {
         Logger.header(
             `🤝 CONSENSUS TRADE (${ready.agreeingTraders.length} traders agree)`
@@ -224,25 +232,32 @@ const doConsensusTrading = async (clobClient: ClobClient, readyList: ConsensusRe
             await UserActivity.updateOne({ _id: trade._id }, { $set: { botExcutedTime: 1 } });
         }
 
-        const my_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-        );
         const user_positions: UserPositionInterface[] = await fetchData(
             `https://data-api.polymarket.com/positions?user=${ready.referenceTrader}`
-        );
-        const my_position = my_positions.find(
-            (position: UserPositionInterface) => position.conditionId === ready.trade.conditionId
         );
         const user_position = user_positions.find(
             (position: UserPositionInterface) => position.conditionId === ready.trade.conditionId
         );
 
-        const my_balance = await getMyBalance(PROXY_WALLET);
+        let my_position: UserPositionInterface | undefined;
+        let my_balance = 0;
+        if (PROXY_WALLET) {
+            const my_positions: UserPositionInterface[] = await fetchData(
+                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
+            );
+            my_position = my_positions.find(
+                (position: UserPositionInterface) => position.conditionId === ready.trade.conditionId
+            );
+            my_balance = await getMyBalance(PROXY_WALLET);
+        }
+
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        Logger.balance(my_balance, user_balance, ready.referenceTrader);
+        if (PROXY_WALLET) {
+            Logger.balance(my_balance, user_balance, ready.referenceTrader);
+        }
 
         await postOrder(
             clobClient,
@@ -268,7 +283,10 @@ const doConsensusTrading = async (clobClient: ClobClient, readyList: ConsensusRe
 /**
  * Execute aggregated trades
  */
-const doAggregatedTrading = async (clobClient: ClobClient, aggregatedTrades: AggregatedTrade[]) => {
+const doAggregatedTrading = async (
+    clobClient: ClobClient | null,
+    aggregatedTrades: AggregatedTrade[]
+) => {
     for (const agg of aggregatedTrades) {
         Logger.header(`📊 AGGREGATED TRADE (${agg.trades.length} trades combined)`);
         Logger.info(`Market: ${agg.slug || agg.asset}`);
@@ -282,28 +300,33 @@ const doAggregatedTrading = async (clobClient: ClobClient, aggregatedTrades: Agg
             await UserActivity.updateOne({ _id: trade._id }, { $set: { botExcutedTime: 1 } });
         }
 
-        const my_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-        );
         const user_positions: UserPositionInterface[] = await fetchData(
             `https://data-api.polymarket.com/positions?user=${agg.userAddress}`
-        );
-        const my_position = my_positions.find(
-            (position: UserPositionInterface) => position.conditionId === agg.conditionId
         );
         const user_position = user_positions.find(
             (position: UserPositionInterface) => position.conditionId === agg.conditionId
         );
 
-        // Get USDC balance
-        const my_balance = await getMyBalance(PROXY_WALLET);
+        let my_position: UserPositionInterface | undefined;
+        let my_balance = 0;
+        if (PROXY_WALLET) {
+            const my_positions: UserPositionInterface[] = await fetchData(
+                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
+            );
+            my_position = my_positions.find(
+                (position: UserPositionInterface) => position.conditionId === agg.conditionId
+            );
+            my_balance = await getMyBalance(PROXY_WALLET);
+        }
 
         // Calculate trader's total portfolio value from positions
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        Logger.balance(my_balance, user_balance, agg.userAddress);
+        if (PROXY_WALLET) {
+            Logger.balance(my_balance, user_balance, agg.userAddress);
+        }
 
         // Create a synthetic trade object for postOrder using aggregated values
         const syntheticTrade: UserActivityInterface = {
@@ -313,7 +336,7 @@ const doAggregatedTrading = async (clobClient: ClobClient, aggregatedTrades: Agg
             side: agg.side as 'BUY' | 'SELL',
         };
 
-        // Execute the aggregated trade
+        // Execute the aggregated trade (or paper-log)
         await postOrder(
             clobClient,
             agg.side === 'BUY' ? 'buy' : 'sell',
@@ -350,8 +373,11 @@ export const stopTradeExecutor = () => {
     Logger.info('Trade executor shutdown requested...');
 };
 
-const tradeExecutor = async (clobClient: ClobClient) => {
+const tradeExecutor = async (clobClient: ClobClient | null) => {
     Logger.success(`Trade executor ready for ${USER_ADDRESSES.length} trader(s)`);
+    if (ENV.PAPER_MODE) {
+        Logger.warning('PAPER MODE — signals logged only, no live orders');
+    }
     if (CONSENSUS_ENABLED) {
         Logger.info(
             `Consensus mode ON: need ${ENV.CONSENSUS_MIN_AGREEMENT}+ traders to agree ` +
