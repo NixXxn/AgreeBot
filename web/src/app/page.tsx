@@ -69,7 +69,7 @@ export default function Home() {
     );
   }
 
-  // Show error only for traders view
+  // Show error only for traders view (still allow switching to Settings)
   if (error && viewMode === 'traders') {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -77,9 +77,12 @@ export default function Home() {
           <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
           <p className="text-muted-foreground mb-4">{error}</p>
           <p className="text-sm text-muted-foreground mb-4">
-            Make sure to run <code className="bg-muted px-2 py-1 rounded">npm run analyze</code> first
-            to generate trader reports.
+            Charts need trader reports (<code className="bg-muted px-2 py-1 rounded">npm run analyze</code>).
+            You can still open Settings — tracked wallets come from <code className="bg-muted px-2 py-1 rounded">USER_ADDRESSES</code>.
           </p>
+          <Button className="mb-4" onClick={() => setViewMode('settings')}>
+            Open Settings
+          </Button>
           <div className="flex gap-2 justify-center">
             <Button onClick={() => fetchTraders()}>Retry</Button>
             <Button variant="outline" onClick={() => setViewMode('settings')}>

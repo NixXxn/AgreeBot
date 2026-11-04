@@ -1,6 +1,8 @@
 node_modules
+web/node_modules
 npm-debug.log
 dist
+web/.next
 .git
 .gitignore
 .env
@@ -15,11 +17,11 @@ coverage
 *.swp
 *.swo
 *~
-README.md
 docs
 .github
 .eslintcache
 .prettiercache
 simulation_results
 trader_data_cache
+trader_reports
 

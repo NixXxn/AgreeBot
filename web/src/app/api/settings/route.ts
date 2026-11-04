@@ -279,17 +279,72 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
   return envUpdates;
 }
 
+function envFromProcess(): Record<string, string> {
+  const keys = [
+    'USER_ADDRESSES',
+    'PROXY_WALLET',
+    'PRIVATE_KEY',
+    'MONGO_URI',
+    'RPC_URL',
+    'CLOB_HTTP_URL',
+    'CLOB_WS_URL',
+    'USDC_CONTRACT_ADDRESS',
+    'COPY_STRATEGY',
+    'COPY_SIZE',
+    'COPY_PERCENTAGE',
+    'TRADE_MULTIPLIER',
+    'TIERED_MULTIPLIERS',
+    'MAX_ORDER_SIZE_USD',
+    'MIN_ORDER_SIZE_USD',
+    'MAX_POSITION_SIZE_USD',
+    'MAX_DAILY_VOLUME_USD',
+    'ADAPTIVE_MIN_PERCENT',
+    'ADAPTIVE_MAX_PERCENT',
+    'ADAPTIVE_THRESHOLD_USD',
+    'FETCH_INTERVAL',
+    'TOO_OLD_TIMESTAMP',
+    'RETRY_LIMIT',
+    'TRADE_AGGREGATION_ENABLED',
+    'TRADE_AGGREGATION_WINDOW_SECONDS',
+    'PREVIEW_MODE',
+    'PAPER_MODE',
+    'REQUEST_TIMEOUT_MS',
+    'NETWORK_RETRY_LIMIT',
+    'CONSENSUS_ENABLED',
+    'CONSENSUS_MIN_AGREEMENT',
+    'CONSENSUS_WINDOW_SECONDS',
+    'CONSENSUS_APPLY_TO',
+    'CONSENSUS_SIZE_MODE',
+  ];
+  const env: Record<string, string> = {};
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value !== undefined && value !== '') {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 export async function GET() {
   try {
-    if (!fs.existsSync(ENV_PATH)) {
+    let env: Record<string, string> = {};
+
+    if (fs.existsSync(ENV_PATH)) {
+      const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
+      env = parseEnvFile(envContent);
+    }
+
+    // Coolify injects vars into process.env — merge so dashboard works without a file
+    env = { ...env, ...envFromProcess() };
+
+    if (Object.keys(env).length === 0) {
       return NextResponse.json(
-        { error: '.env file not found' },
+        { error: '.env file not found and no process env configured' },
         { status: 404 }
       );
     }
 
-    const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
-    const env = parseEnvFile(envContent);
     const settings = envToSettings(env);
     const traderLabels = getTraderLabels();
 

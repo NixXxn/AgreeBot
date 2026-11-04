@@ -16,11 +16,11 @@ Coolify can run this bot from the included `Dockerfile`. MongoDB Atlas is the si
 2. Connect this repository
 3. **Build Pack:** Dockerfile  
 4. **Dockerfile location:** `/Dockerfile` (repo root)
-5. **Port:** `3000` (health server)
+5. **Port:** `3000` (web dashboard)
 6. **Healthcheck Path:** `/health`  
    Method: GET — expected status 200
 
-Coolify will build the multi-stage image and start `node dist/index.js`.
+Coolify builds the bot **and** the Next.js dashboard. The public URL is the dashboard; the bot runs in the same container (internal health on `:3001`).
 
 ## 2. Environment variables
 
