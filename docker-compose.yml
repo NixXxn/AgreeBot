@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+    bot:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: agreebot
+        restart: unless-stopped
+        env_file:
+            - .env
+        environment:
+            # When using the bundled MongoDB service, point MONGO_URI here
+            # (override in .env if you use Atlas instead)
+            HEALTH_PORT: ${HEALTH_PORT:-3000}
+        ports:
+            - '${HEALTH_PORT:-3000}:3000'
+        depends_on:
+            mongodb:
+                condition: service_healthy
+        networks:
+            - bot-network
+        healthcheck:
+            test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/health']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
+
+    mongodb:
+        image: mongo:7
+        container_name: agreebot-mongodb
+        restart: unless-stopped
+        ports:
+            - '27017:27017'
+        volumes:
+            - mongodb-data:/data/db
+            - mongodb-config:/data/configdb
+        networks:
+            - bot-network
+        environment:
+            MONGO_INITDB_DATABASE: polymarket_copytrading
+        healthcheck:
+            test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+networks:
+    bot-network:
+        driver: bridge
+
+volumes:
+    mongodb-data:
+    mongodb-config:
