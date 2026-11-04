@@ -3,6 +3,60 @@ import { CopyStrategy, CopyStrategyConfig, parseTieredMultipliers } from './copy
 dotenv.config();
 
 /**
+ * Strip wrapping quotes Coolify / copy-paste often leave on env values.
+ * e.g. PROXY_WALLET=''  →  empty  |  PROXY_WALLET='0xabc…'  →  0xabc…
+ */
+const stripWrappingQuotes = (value: string): string => {
+    const trimmed = value.trim();
+    if (
+        (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+        (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    ) {
+        return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+};
+
+const PLACEHOLDER_VALUES = new Set([
+    '',
+    'your_private_key_here_without_0x_prefix',
+    'your_polygon_wallet',
+    'changeme',
+    'change_me',
+    'todo',
+    'xxx',
+]);
+
+/**
+ * Normalize all string env vars once at startup so validation sees real values.
+ */
+const normalizeEnvValues = (): void => {
+    for (const [key, raw] of Object.entries(process.env)) {
+        if (typeof raw !== 'string') continue;
+        const cleaned = stripWrappingQuotes(raw);
+        if (cleaned !== raw) {
+            process.env[key] = cleaned;
+        }
+        // Treat known placeholders as unset so required-env checks catch them
+        if (PLACEHOLDER_VALUES.has(cleaned.toLowerCase()) || PLACEHOLDER_VALUES.has(cleaned)) {
+            if (
+                [
+                    'PROXY_WALLET',
+                    'PRIVATE_KEY',
+                    'MONGO_URI',
+                    'RPC_URL',
+                    'USER_ADDRESSES',
+                ].includes(key)
+            ) {
+                delete process.env[key];
+            }
+        }
+    }
+};
+
+normalizeEnvValues();
+
+/**
  * Validate Ethereum address format
  */
 const isValidEthereumAddress = (address: string): boolean => {
@@ -26,7 +80,8 @@ const validateRequiredEnv = (): void => {
 
     const missing: string[] = [];
     for (const key of required) {
-        if (!process.env[key]) {
+        const value = process.env[key];
+        if (!value || !value.trim()) {
             missing.push(key);
         }
     }
@@ -34,7 +89,9 @@ const validateRequiredEnv = (): void => {
     if (missing.length > 0) {
         throw new Error(
             `Missing required environment variables: ${missing.join(', ')}\n` +
-                `Please check your .env file. See .env.example for reference.`
+                `Set these in Coolify → Environment Variables (or your .env file).\n` +
+                `Do not leave PROXY_WALLET / PRIVATE_KEY empty — use your real Polygon wallet.\n` +
+                `See .env.example and docs/COOLIFY.md.`
         );
     }
 };
@@ -43,19 +100,19 @@ const validateRequiredEnv = (): void => {
  * Validate Ethereum addresses
  */
 const validateAddresses = (): void => {
-    if (process.env.PROXY_WALLET && !isValidEthereumAddress(process.env.PROXY_WALLET)) {
+    const proxyWallet = process.env.PROXY_WALLET?.trim();
+    if (proxyWallet && !isValidEthereumAddress(proxyWallet)) {
         throw new Error(
-            `Invalid PROXY_WALLET address format: ${process.env.PROXY_WALLET}\n` +
-                `Expected format: 0x followed by 40 hexadecimal characters`
+            `Invalid PROXY_WALLET address format: "${proxyWallet}"\n` +
+                `Expected format: 0x followed by 40 hexadecimal characters\n` +
+                `Tip: In Coolify, set the value without quotes (0xabc… not '0xabc…').`
         );
     }
 
-    if (
-        process.env.USDC_CONTRACT_ADDRESS &&
-        !isValidEthereumAddress(process.env.USDC_CONTRACT_ADDRESS)
-    ) {
+    const usdc = process.env.USDC_CONTRACT_ADDRESS?.trim();
+    if (usdc && !isValidEthereumAddress(usdc)) {
         throw new Error(
-            `Invalid USDC_CONTRACT_ADDRESS format: ${process.env.USDC_CONTRACT_ADDRESS}\n` +
+            `Invalid USDC_CONTRACT_ADDRESS format: "${usdc}"\n` +
                 `Expected format: 0x followed by 40 hexadecimal characters`
         );
     }

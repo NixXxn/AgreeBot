@@ -28,15 +28,21 @@ In the Coolify app → **Environment Variables**, set at least:
 
 | Key | Example / notes |
 | --- | --- |
-| `USER_ADDRESSES` | `0xTrader1,0xTrader2,0xTrader3` |
-| `PROXY_WALLET` | Your Polygon address |
-| `PRIVATE_KEY` | Key **without** `0x` — mark as secret |
+| `USER_ADDRESSES` | Already in `.env.example` (50 wallets) — paste that list, **no wrapping quotes** |
+| `PROXY_WALLET` | Your Polygon address: `0x` + 40 hex chars. **Required** — empty value crashes the bot |
+| `PRIVATE_KEY` | Key **without** `0x` — mark as secret. **Required** |
 | `MONGO_URI` | `mongodb+srv://...` Atlas string |
 | `RPC_URL` | Your Polygon RPC |
 | `CLOB_HTTP_URL` | `https://clob.polymarket.com/` |
 | `CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws` |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` |
 | `HEALTH_PORT` | `3000` |
+
+**Coolify tip:** paste values without quotes.  
+Bad: `PROXY_WALLET=''` or `PROXY_WALLET='0xabc…'`  
+Good: `PROXY_WALLET=0xabc…`
+
+If logs show `Invalid PROXY_WALLET address format: ''`, the variable is empty or still has quote characters — set your real wallet and redeploy.
 
 ### Consensus (recommended for AgreeBot)
 
