@@ -42,6 +42,62 @@ describe('calculateOrderSize', () => {
         });
     });
 
+    describe('KELLY strategy (half Kelly / bankroll)', () => {
+        const kellyConfig: CopyStrategyConfig = {
+            strategy: CopyStrategy.KELLY,
+            copySize: 10,
+            kellyFraction: 0.5,
+            kellyEdge: 0.05,
+            kellyMaxFraction: 0.25,
+            maxOrderSizeUSD: 5000,
+            minOrderSizeUSD: 1.0,
+        };
+
+        it('sizes from bankroll, not trader order size', () => {
+            const smallTrader = calculateOrderSize(kellyConfig, 10, 10000, 0, {
+                marketPrice: 0.4,
+            });
+            const largeTrader = calculateOrderSize(kellyConfig, 5000, 10000, 0, {
+                marketPrice: 0.4,
+            });
+            expect(smallTrader.finalAmount).toBeCloseTo(largeTrader.finalAmount, 5);
+            expect(smallTrader.finalAmount).toBeGreaterThan(0);
+            expect(smallTrader.reasoning).toMatch(/ignored/i);
+        });
+
+        it('returns 0 when edge cannot beat the market', () => {
+            const result = calculateOrderSize(
+                { ...kellyConfig, kellyEdge: 0.001 },
+                100,
+                10000,
+                0,
+                { marketPrice: 0.99 }
+            );
+            // p = 0.991 still > 0.99 so tiny edge; use price where p<=c after clamp
+            const noEdge = calculateOrderSize(
+                { ...kellyConfig, kellyEdge: 0 },
+                100,
+                10000,
+                0,
+                { marketPrice: 0.5 }
+            );
+            expect(noEdge.finalAmount).toBe(0);
+            expect(result.finalAmount).toBeGreaterThanOrEqual(0);
+        });
+
+        it('respects half-Kelly vs full Kelly', () => {
+            const half = calculateOrderSize(kellyConfig, 100, 10000, 0, { marketPrice: 0.4 });
+            const full = calculateOrderSize(
+                { ...kellyConfig, kellyFraction: 1.0 },
+                100,
+                10000,
+                0,
+                { marketPrice: 0.4 }
+            );
+            expect(full.finalAmount).toBeCloseTo(half.finalAmount * 2, 4);
+        });
+    });
+
     describe('FIXED strategy', () => {
         const fixedConfig: CopyStrategyConfig = {
             strategy: CopyStrategy.FIXED,

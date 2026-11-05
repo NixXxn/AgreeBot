@@ -361,6 +361,16 @@ const parseCopyStrategy = (): CopyStrategyConfig => {
         config.adaptiveThreshold = parseFloat(process.env.ADAPTIVE_THRESHOLD_USD || '500.0');
     }
 
+    // Kelly / half-Kelly parameters
+    if (strategy === CopyStrategy.KELLY) {
+        config.kellyFraction = parseFloat(process.env.KELLY_FRACTION || '0.5'); // half Kelly
+        config.kellyEdge = parseFloat(process.env.KELLY_EDGE || '0.05');
+        config.kellyMaxFraction = parseFloat(process.env.KELLY_MAX_FRACTION || '0.25');
+        console.log(
+            `✓ Kelly sizing: ${config.kellyFraction}x Kelly, edge +${((config.kellyEdge || 0) * 100).toFixed(1)}pp, max ${(config.kellyMaxFraction || 0) * 100}% of bankroll`
+        );
+    }
+
     // Parse tiered multipliers if configured
     if (process.env.TIERED_MULTIPLIERS) {
         try {

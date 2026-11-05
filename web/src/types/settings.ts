@@ -1,4 +1,4 @@
-export type CopyStrategy = 'PERCENTAGE' | 'FIXED' | 'ADAPTIVE';
+export type CopyStrategy = 'PERCENTAGE' | 'FIXED' | 'ADAPTIVE' | 'KELLY';
 
 export interface MultiplierTier {
   min: number;
@@ -16,6 +16,9 @@ export interface BotSettings {
     copySize: number;
     tradeMultiplier: number;
     tieredMultipliers: string | null; // raw string from .env
+    kellyFraction: number;
+    kellyEdge: number;
+    kellyMaxFraction: number;
   };
 
   // Safety Limits

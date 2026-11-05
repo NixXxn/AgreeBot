@@ -83,7 +83,8 @@ const postOrder = async (
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             paperBalance,
-            my_position?.currentValue || 0
+            my_position?.currentValue || 0,
+            { marketPrice: trade.price }
         );
         Logger.warning(
             `[PAPER] Would ${condition.toUpperCase()} ` +
@@ -197,12 +198,13 @@ const postOrder = async (
         // Get current position size for position limit checks
         const currentPositionValue = my_position ? my_position.size * my_position.avgPrice : 0;
 
-        // Use new copy strategy system
+        // Use new copy strategy system (KELLY uses your bankroll + market price, not trader size)
         const orderCalc = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             my_balance,
-            currentPositionValue
+            currentPositionValue,
+            { marketPrice: trade.price }
         );
 
         // Log the calculation reasoning

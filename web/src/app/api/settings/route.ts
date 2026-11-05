@@ -72,6 +72,9 @@ function envToSettings(env: Record<string, string>): BotSettings {
       copySize: parseFloat(env.COPY_SIZE || env.COPY_PERCENTAGE || '10'),
       tradeMultiplier: parseFloat(env.TRADE_MULTIPLIER || '1'),
       tieredMultipliers: env.TIERED_MULTIPLIERS || null,
+      kellyFraction: parseFloat(env.KELLY_FRACTION || '0.5'),
+      kellyEdge: parseFloat(env.KELLY_EDGE || '0.05'),
+      kellyMaxFraction: parseFloat(env.KELLY_MAX_FRACTION || '0.25'),
     },
     safetyLimits: {
       maxOrderSizeUSD: parseFloat(env.MAX_ORDER_SIZE_USD || '100'),
@@ -206,6 +209,15 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
     if (update.copyStrategy.tieredMultipliers !== undefined) {
       envUpdates.TIERED_MULTIPLIERS = update.copyStrategy.tieredMultipliers || '';
     }
+    if (update.copyStrategy.kellyFraction !== undefined) {
+      envUpdates.KELLY_FRACTION = update.copyStrategy.kellyFraction.toString();
+    }
+    if (update.copyStrategy.kellyEdge !== undefined) {
+      envUpdates.KELLY_EDGE = update.copyStrategy.kellyEdge.toString();
+    }
+    if (update.copyStrategy.kellyMaxFraction !== undefined) {
+      envUpdates.KELLY_MAX_FRACTION = update.copyStrategy.kellyMaxFraction.toString();
+    }
   }
 
   if (update.safetyLimits) {
@@ -298,6 +310,9 @@ function envFromProcess(): Record<string, string> {
     'COPY_PERCENTAGE',
     'TRADE_MULTIPLIER',
     'TIERED_MULTIPLIERS',
+    'KELLY_FRACTION',
+    'KELLY_EDGE',
+    'KELLY_MAX_FRACTION',
     'MAX_ORDER_SIZE_USD',
     'MIN_ORDER_SIZE_USD',
     'MAX_POSITION_SIZE_USD',

@@ -1,17 +1,18 @@
 /**
  * Copy Trading Strategy Configuration
  *
- * This module defines the strategy for copying trades from followed traders.
- * Three strategies are supported:
+ * Strategies:
  * - PERCENTAGE: Copy a fixed percentage of trader's order size
  * - FIXED: Copy a fixed dollar amount per trade
  * - ADAPTIVE: Dynamically adjust percentage based on trader's order size
+ * - KELLY: Size from YOUR bankroll using (fractional) Kelly — ignores trader size
  */
 
 export enum CopyStrategy {
     PERCENTAGE = 'PERCENTAGE',
     FIXED = 'FIXED',
     ADAPTIVE = 'ADAPTIVE',
+    KELLY = 'KELLY',
 }
 
 /**
@@ -40,6 +41,13 @@ export interface CopyStrategyConfig {
     adaptiveMaxPercent?: number; // Maximum percentage for small orders
     adaptiveThreshold?: number; // Threshold in USD to trigger adaptation
 
+    // Kelly / half-Kelly (strategy = KELLY) — bankroll-based, not trader-size-based
+    // f* = (p - c) / (1 - c) for buying YES at price c with assumed true prob p = c + edge
+    // stake = bankroll * kellyFraction * f*
+    kellyFraction?: number; // 0.5 = half Kelly (default), 1.0 = full Kelly
+    kellyEdge?: number; // Assumed edge over market price (e.g. 0.05 = +5pp)
+    kellyMaxFraction?: number; // Hard cap on bankroll fraction per bet (default 0.25)
+
     // Tiered multipliers (optional - applies to all strategies)
     // If set, multiplier is applied based on trader's order size
     tieredMultipliers?: MultiplierTier[];
@@ -55,6 +63,11 @@ export interface CopyStrategyConfig {
     maxDailyVolumeUSD?: number; // Maximum total volume per day (optional)
 }
 
+export interface OrderSizeOptions {
+    /** Market price of the outcome token (0–1). Required for KELLY. */
+    marketPrice?: number;
+}
+
 export interface OrderSizeCalculation {
     traderOrderSize: number; // Original trader's order size
     baseAmount: number; // Calculated amount before limits
@@ -67,13 +80,34 @@ export interface OrderSizeCalculation {
 }
 
 /**
+ * Binary-market Kelly fraction for buying an outcome at price `c`
+ * with assumed true probability `p = c + edge`.
+ * Returns 0 when there is no positive edge.
+ */
+export function kellyBuyFraction(
+    marketPrice: number,
+    edge: number,
+    kellyFraction: number
+): { fStar: number; f: number; p: number; c: number } {
+    const c = Math.min(Math.max(marketPrice, 0.01), 0.99);
+    const p = Math.min(Math.max(c + edge, 0.01), 0.99);
+    if (p <= c) {
+        return { fStar: 0, f: 0, p, c };
+    }
+    const fStar = (p - c) / (1 - c);
+    const f = Math.max(0, kellyFraction * fStar);
+    return { fStar, f, p, c };
+}
+
+/**
  * Calculate order size based on copy strategy
  */
 export function calculateOrderSize(
     config: CopyStrategyConfig,
     traderOrderSize: number,
     availableBalance: number,
-    currentPositionSize: number = 0
+    currentPositionSize: number = 0,
+    options: OrderSizeOptions = {}
 ): OrderSizeCalculation {
     let baseAmount: number;
     let reasoning: string;
@@ -90,18 +124,40 @@ export function calculateOrderSize(
             reasoning = `Fixed amount: $${baseAmount.toFixed(2)}`;
             break;
 
-        case CopyStrategy.ADAPTIVE:
+        case CopyStrategy.ADAPTIVE: {
             const adaptivePercent = calculateAdaptivePercent(config, traderOrderSize);
             baseAmount = traderOrderSize * (adaptivePercent / 100);
             reasoning = `Adaptive ${adaptivePercent.toFixed(1)}% of trader's $${traderOrderSize.toFixed(2)} = $${baseAmount.toFixed(2)}`;
             break;
+        }
+
+        case CopyStrategy.KELLY: {
+            const price = options.marketPrice ?? 0.5;
+            const edge = config.kellyEdge ?? 0.05;
+            const fraction = config.kellyFraction ?? 0.5;
+            const maxFrac = config.kellyMaxFraction ?? 0.25;
+            const { fStar, f, p, c } = kellyBuyFraction(price, edge, fraction);
+            let applied = Math.min(f, maxFrac);
+            baseAmount = availableBalance * applied;
+            reasoning =
+                `Kelly(${fraction}x) bankroll $${availableBalance.toFixed(0)} @ price ${c.toFixed(3)} ` +
+                `edge +${(edge * 100).toFixed(1)}pp → p=${p.toFixed(3)} f*=${fStar.toFixed(3)} ` +
+                `f=${applied.toFixed(3)} → $${baseAmount.toFixed(2)}` +
+                (traderOrderSize > 0 ? ` (trader size $${traderOrderSize.toFixed(2)} ignored)` : '');
+            if (fStar <= 0) {
+                reasoning += ' → no edge, skip';
+            }
+            break;
+        }
 
         default:
             throw new Error(`Unknown strategy: ${config.strategy}`);
     }
 
     // Step 1.5: Apply tiered or single multiplier based on trader's order size
-    const multiplier = getTradeMultiplier(config, traderOrderSize);
+    // (skipped for KELLY — sizing is already bankroll-based)
+    const multiplier =
+        config.strategy === CopyStrategy.KELLY ? 1.0 : getTradeMultiplier(config, traderOrderSize);
     let finalAmount = baseAmount * multiplier;
 
     if (multiplier !== 1.0) {
@@ -231,6 +287,17 @@ export function validateCopyStrategyConfig(config: CopyStrategyConfig): string[]
             if (config.adaptiveMinPercent > config.adaptiveMaxPercent) {
                 errors.push('adaptiveMinPercent cannot be greater than adaptiveMaxPercent');
             }
+        }
+    }
+
+    if (config.strategy === CopyStrategy.KELLY) {
+        const fraction = config.kellyFraction ?? 0.5;
+        const edge = config.kellyEdge ?? 0.05;
+        if (fraction <= 0 || fraction > 1) {
+            errors.push('kellyFraction must be between 0 and 1 (0.5 = half Kelly)');
+        }
+        if (edge <= 0 || edge >= 0.5) {
+            errors.push('kellyEdge must be between 0 and 0.5 (e.g. 0.05 = +5pp)');
         }
     }
 
