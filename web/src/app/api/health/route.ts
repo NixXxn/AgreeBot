@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
 import { HealthCheckResult } from '@/types/settings';
-
-// Environment variables are read from the main project's .env
-// We need to read them manually since Next.js has its own env handling
 import * as fs from 'fs';
 import * as path from 'path';
+import { getRuntimeOverrides } from '@/lib/runtimeSettings';
 
 const ENV_PATH = path.join(process.cwd(), '..', '.env');
 
-function getEnvValue(key: string): string | undefined {
+function readEnvFileValue(key: string): string | undefined {
   try {
     if (!fs.existsSync(ENV_PATH)) return undefined;
     const content = fs.readFileSync(ENV_PATH, 'utf-8');
@@ -24,8 +22,10 @@ function getEnvValue(key: string): string | undefined {
       const lineKey = trimmed.slice(0, equalIndex).trim();
       if (lineKey === key) {
         let value = trimmed.slice(equalIndex + 1).trim();
-        if ((value.startsWith("'") && value.endsWith("'")) ||
-            (value.startsWith('"') && value.endsWith('"'))) {
+        if (
+          (value.startsWith("'") && value.endsWith("'")) ||
+          (value.startsWith('"') && value.endsWith('"'))
+        ) {
           value = value.slice(1, -1);
         }
         return value;
@@ -38,6 +38,13 @@ function getEnvValue(key: string): string | undefined {
 }
 
 export async function GET() {
+  const overrides = await getRuntimeOverrides();
+  const getEnvValue = (key: string): string | undefined => {
+    if (overrides[key] !== undefined && overrides[key] !== '') return overrides[key];
+    if (process.env[key]) return process.env[key];
+    return readEnvFileValue(key);
+  };
+
   const result: HealthCheckResult = {
     healthy: true,
     checks: {
@@ -49,18 +56,14 @@ export async function GET() {
     timestamp: new Date().toISOString(),
   };
 
-  // Check MongoDB connection
   try {
     const mongoUri = getEnvValue('MONGO_URI');
     if (!mongoUri) {
       result.checks.database = { status: 'error', message: 'MONGO_URI not configured' };
       result.healthy = false;
-    } else {
-      // Simple check - just verify URI format
-      if (!mongoUri.startsWith('mongodb')) {
-        result.checks.database = { status: 'error', message: 'Invalid MongoDB URI format' };
-        result.healthy = false;
-      }
+    } else if (!mongoUri.startsWith('mongodb')) {
+      result.checks.database = { status: 'error', message: 'Invalid MongoDB URI format' };
+      result.healthy = false;
     }
   } catch (error) {
     result.checks.database = { status: 'error', message: String(error) };
@@ -70,7 +73,6 @@ export async function GET() {
   const paperMode =
     getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
 
-  // Check RPC endpoint
   try {
     const rpcUrl = getEnvValue('RPC_URL');
     if (!rpcUrl) {
@@ -81,7 +83,6 @@ export async function GET() {
         result.healthy = false;
       }
     } else {
-      // Try to call eth_blockNumber
       const response = await fetch(rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -109,30 +110,37 @@ export async function GET() {
     result.healthy = false;
   }
 
-  // Check Polymarket API
   try {
     const clobUrl = getEnvValue('CLOB_HTTP_URL') || 'https://clob.polymarket.com/';
-    const response = await fetch(`${clobUrl}time`, {
-      method: 'GET',
-    });
+    const response = await fetch(`${clobUrl}time`, { method: 'GET' });
 
     if (!response.ok) {
-      result.checks.api = { status: 'error', message: `Polymarket API returned ${response.status}` };
+      result.checks.api = {
+        status: 'error',
+        message: `Polymarket API returned ${response.status}`,
+      };
       result.healthy = false;
     }
   } catch (error) {
-    result.checks.api = { status: 'error', message: `Polymarket API connection failed: ${error}` };
+    result.checks.api = {
+      status: 'error',
+      message: `Polymarket API connection failed: ${error}`,
+    };
     result.healthy = false;
   }
 
-  // Check USDC balance via RPC
   try {
     const rpcUrl = getEnvValue('RPC_URL');
-    const proxyWallet = getEnvValue('PROXY_WALLET');
-    const usdcContract = getEnvValue('USDC_CONTRACT_ADDRESS') || '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+    const proxyWallet = (getEnvValue('PROXY_WALLET') || '').replace(/^['"]|['"]$/g, '');
+    const usdcContract =
+      getEnvValue('USDC_CONTRACT_ADDRESS') || '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 
-    if (rpcUrl && proxyWallet) {
-      // ERC20 balanceOf call
+    if (paperMode || !proxyWallet || !/^0x[a-fA-F0-9]{40}$/i.test(proxyWallet)) {
+      result.checks.balance = {
+        status: 'ok',
+        message: paperMode ? 'Skipped (paper mode)' : 'Wallet not configured',
+      };
+    } else if (rpcUrl) {
       const data = `0x70a08231000000000000000000000000${proxyWallet.slice(2).toLowerCase()}`;
 
       const response = await fetch(rpcUrl, {
@@ -149,7 +157,6 @@ export async function GET() {
       if (response.ok) {
         const json = await response.json();
         if (json.result) {
-          // USDC has 6 decimals
           const balanceWei = BigInt(json.result);
           const balance = Number(balanceWei) / 1e6;
 
@@ -167,7 +174,7 @@ export async function GET() {
         }
       }
     } else {
-      result.checks.balance = { status: 'warning', message: 'Wallet not configured' };
+      result.checks.balance = { status: 'warning', message: 'RPC not configured' };
     }
   } catch (error) {
     result.checks.balance = { status: 'error', message: `Failed to check balance: ${error}` };

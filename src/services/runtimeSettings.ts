@@ -74,11 +74,12 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.TRADE_AGGREGATION_ENABLED !== undefined) {
         ENV.TRADE_AGGREGATION_ENABLED = overrides.TRADE_AGGREGATION_ENABLED === 'true';
     }
-    if (overrides.PREVIEW_MODE !== undefined) {
-        ENV.PREVIEW_MODE = overrides.PREVIEW_MODE === 'true';
-    }
     if (overrides.PAPER_MODE !== undefined) {
         ENV.PAPER_MODE = overrides.PAPER_MODE === 'true';
+        ENV.PREVIEW_MODE = ENV.PAPER_MODE;
+    } else if (overrides.PREVIEW_MODE !== undefined) {
+        ENV.PREVIEW_MODE = overrides.PREVIEW_MODE === 'true';
+        ENV.PAPER_MODE = ENV.PREVIEW_MODE;
     }
     if (overrides.AUTO_RESOLVE_ENABLED !== undefined) {
         ENV.AUTO_RESOLVE_ENABLED = overrides.AUTO_RESOLVE_ENABLED === 'true';
@@ -105,32 +106,53 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.RETRY_LIMIT) {
         ENV.RETRY_LIMIT = parseInt(overrides.RETRY_LIMIT, 10) || ENV.RETRY_LIMIT;
     }
-    if (overrides.COPY_STRATEGY || overrides.COPY_SIZE || overrides.KELLY_FRACTION) {
-        // Keep strategy config in sync when dashboard changes copy settings
-        if (overrides.COPY_STRATEGY) {
-            ENV.COPY_STRATEGY_CONFIG.strategy = overrides.COPY_STRATEGY.toUpperCase() as typeof ENV.COPY_STRATEGY_CONFIG.strategy;
-        }
-        if (overrides.COPY_SIZE) {
-            ENV.COPY_STRATEGY_CONFIG.copySize = parseFloat(overrides.COPY_SIZE);
-        }
-        if (overrides.TRADE_MULTIPLIER) {
-            ENV.COPY_STRATEGY_CONFIG.tradeMultiplier = parseFloat(overrides.TRADE_MULTIPLIER);
-            ENV.TRADE_MULTIPLIER = parseFloat(overrides.TRADE_MULTIPLIER);
-        }
-        if (overrides.KELLY_FRACTION) {
-            ENV.COPY_STRATEGY_CONFIG.kellyFraction = parseFloat(overrides.KELLY_FRACTION);
-        }
-        if (overrides.KELLY_EDGE) {
-            ENV.COPY_STRATEGY_CONFIG.kellyEdge = parseFloat(overrides.KELLY_EDGE);
-        }
-        if (overrides.KELLY_MAX_FRACTION) {
-            ENV.COPY_STRATEGY_CONFIG.kellyMaxFraction = parseFloat(overrides.KELLY_MAX_FRACTION);
-        }
-        if (overrides.MAX_ORDER_SIZE_USD) {
-            ENV.COPY_STRATEGY_CONFIG.maxOrderSizeUSD = parseFloat(overrides.MAX_ORDER_SIZE_USD);
-        }
-        if (overrides.MIN_ORDER_SIZE_USD) {
-            ENV.COPY_STRATEGY_CONFIG.minOrderSizeUSD = parseFloat(overrides.MIN_ORDER_SIZE_USD);
-        }
+    // Keep strategy / safety config in sync when dashboard changes settings
+    if (overrides.COPY_STRATEGY) {
+        ENV.COPY_STRATEGY_CONFIG.strategy =
+            overrides.COPY_STRATEGY.toUpperCase() as typeof ENV.COPY_STRATEGY_CONFIG.strategy;
+    }
+    if (overrides.COPY_SIZE) {
+        ENV.COPY_STRATEGY_CONFIG.copySize = parseFloat(overrides.COPY_SIZE);
+    }
+    if (overrides.TRADE_MULTIPLIER) {
+        ENV.COPY_STRATEGY_CONFIG.tradeMultiplier = parseFloat(overrides.TRADE_MULTIPLIER);
+        ENV.TRADE_MULTIPLIER = parseFloat(overrides.TRADE_MULTIPLIER);
+    }
+    if (overrides.KELLY_FRACTION) {
+        ENV.COPY_STRATEGY_CONFIG.kellyFraction = parseFloat(overrides.KELLY_FRACTION);
+    }
+    if (overrides.KELLY_EDGE) {
+        ENV.COPY_STRATEGY_CONFIG.kellyEdge = parseFloat(overrides.KELLY_EDGE);
+    }
+    if (overrides.KELLY_MAX_FRACTION) {
+        ENV.COPY_STRATEGY_CONFIG.kellyMaxFraction = parseFloat(overrides.KELLY_MAX_FRACTION);
+    }
+    if (overrides.MAX_ORDER_SIZE_USD) {
+        ENV.COPY_STRATEGY_CONFIG.maxOrderSizeUSD = parseFloat(overrides.MAX_ORDER_SIZE_USD);
+    }
+    if (overrides.MIN_ORDER_SIZE_USD) {
+        ENV.COPY_STRATEGY_CONFIG.minOrderSizeUSD = parseFloat(overrides.MIN_ORDER_SIZE_USD);
+    }
+    if (overrides.MAX_POSITION_SIZE_USD) {
+        ENV.COPY_STRATEGY_CONFIG.maxPositionSizeUSD = parseFloat(overrides.MAX_POSITION_SIZE_USD);
+    }
+    if (overrides.MAX_DAILY_VOLUME_USD) {
+        ENV.COPY_STRATEGY_CONFIG.maxDailyVolumeUSD = parseFloat(overrides.MAX_DAILY_VOLUME_USD);
+    }
+    if (overrides.ADAPTIVE_MIN_PERCENT) {
+        ENV.COPY_STRATEGY_CONFIG.adaptiveMinPercent = parseFloat(overrides.ADAPTIVE_MIN_PERCENT);
+    }
+    if (overrides.ADAPTIVE_MAX_PERCENT) {
+        ENV.COPY_STRATEGY_CONFIG.adaptiveMaxPercent = parseFloat(overrides.ADAPTIVE_MAX_PERCENT);
+    }
+    if (overrides.ADAPTIVE_THRESHOLD_USD) {
+        ENV.COPY_STRATEGY_CONFIG.adaptiveThreshold = parseFloat(overrides.ADAPTIVE_THRESHOLD_USD);
+    }
+    if (overrides.REQUEST_TIMEOUT_MS) {
+        ENV.REQUEST_TIMEOUT_MS = parseInt(overrides.REQUEST_TIMEOUT_MS, 10) || ENV.REQUEST_TIMEOUT_MS;
+    }
+    if (overrides.NETWORK_RETRY_LIMIT) {
+        ENV.NETWORK_RETRY_LIMIT =
+            parseInt(overrides.NETWORK_RETRY_LIMIT, 10) || ENV.NETWORK_RETRY_LIMIT;
     }
 };

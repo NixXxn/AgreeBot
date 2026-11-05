@@ -121,7 +121,9 @@ export function SettingsView() {
 
       setSettings(data.settings);
       setHasChanges(false);
-      setSuccessMessage('Settings saved! Restart the bot to apply changes.');
+      setSuccessMessage(
+        'Settings saved to MongoDB. Restart the bot container so the trading process reloads them.'
+      );
 
       // Clear success message after 5 seconds
       setTimeout(() => setSuccessMessage(null), 5000);
@@ -258,6 +260,7 @@ export function SettingsView() {
           <QuickActionsSection
             healthCheck={healthCheck}
             onRefreshHealth={fetchHealth}
+            paperMode={Boolean(settings.botSettings?.previewMode)}
           />
         </div>
       </div>

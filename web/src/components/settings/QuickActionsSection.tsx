@@ -11,6 +11,7 @@ import { ActionType, ActionResponse, HealthCheckResult } from '@/types/settings'
 interface QuickActionsSectionProps {
   healthCheck: HealthCheckResult | null;
   onRefreshHealth: () => void;
+  paperMode?: boolean;
 }
 
 interface ActionState {
@@ -18,9 +19,21 @@ interface ActionState {
   result: ActionResponse | null;
 }
 
-export function QuickActionsSection({ healthCheck, onRefreshHealth }: QuickActionsSectionProps) {
+export function QuickActionsSection({
+  healthCheck,
+  onRefreshHealth,
+  paperMode = false,
+}: QuickActionsSectionProps) {
   const [actionStates, setActionStates] = useState<Record<string, ActionState>>({});
   const [manualSellKeyword, setManualSellKeyword] = useState('');
+
+  const walletActions = new Set<ActionType>([
+    'check-stats',
+    'manual-sell',
+    'close-resolved',
+    'redeem-resolved',
+    'close-stale',
+  ]);
 
   const executeAction = async (action: ActionType, params?: { keyword?: string }) => {
     setActionStates(prev => ({
@@ -141,21 +154,35 @@ export function QuickActionsSection({ healthCheck, onRefreshHealth }: QuickActio
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {paperMode && (
+            <Alert variant="warning">
+              <AlertTitle>Paper mode</AlertTitle>
+              <AlertDescription>
+                Close / redeem / sell need a live wallet. Health Check still works.
+                Disable Paper mode and set PROXY_WALLET + PRIVATE_KEY to use the others.
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {actions.map(({ action, label, description, variant }) => {
               const state = getActionState(action);
+              const blocked = paperMode && walletActions.has(action);
               return (
                 <Button
                   key={action}
                   variant={variant || 'default'}
                   className="h-auto py-3 flex flex-col items-start text-left"
                   onClick={() => executeAction(action)}
-                  disabled={state.loading}
+                  disabled={state.loading || blocked}
+                  title={blocked ? 'Requires live wallet (paper mode is on)' : undefined}
                 >
                   <span className="font-medium">
                     {state.loading ? 'Running...' : label}
                   </span>
-                  <span className="text-xs opacity-70 font-normal">{description}</span>
+                  <span className="text-xs opacity-70 font-normal">
+                    {blocked ? 'Needs live wallet' : description}
+                  </span>
                 </Button>
               );
             })}
@@ -173,6 +200,7 @@ export function QuickActionsSection({ healthCheck, onRefreshHealth }: QuickActio
                 value={manualSellKeyword}
                 onChange={(e) => setManualSellKeyword(e.target.value)}
                 className="flex-1"
+                disabled={paperMode}
               />
               <Button
                 variant="destructive"
@@ -181,7 +209,11 @@ export function QuickActionsSection({ healthCheck, onRefreshHealth }: QuickActio
                     executeAction('manual-sell', { keyword: manualSellKeyword.trim() });
                   }
                 }}
-                disabled={!manualSellKeyword.trim() || getActionState('manual-sell').loading}
+                disabled={
+                  paperMode ||
+                  !manualSellKeyword.trim() ||
+                  getActionState('manual-sell').loading
+                }
               >
                 {getActionState('manual-sell').loading ? 'Selling...' : 'Sell'}
               </Button>

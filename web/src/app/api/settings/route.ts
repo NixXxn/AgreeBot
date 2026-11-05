@@ -265,7 +265,9 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
       envUpdates.TRADE_AGGREGATION_WINDOW_SECONDS = update.botSettings.tradeAggregationWindowSeconds.toString();
     }
     if (update.botSettings.previewMode !== undefined) {
+      // Bot checks PAPER_MODE; PREVIEW_MODE is the legacy alias — keep both in sync
       envUpdates.PREVIEW_MODE = update.botSettings.previewMode.toString();
+      envUpdates.PAPER_MODE = update.botSettings.previewMode.toString();
     }
     if (update.botSettings.consensusEnabled !== undefined) {
       envUpdates.CONSENSUS_ENABLED = update.botSettings.consensusEnabled.toString();
