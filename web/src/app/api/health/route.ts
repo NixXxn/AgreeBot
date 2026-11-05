@@ -80,15 +80,57 @@ export async function GET() {
     result.healthy = false;
   }
 
+  // Bot uses Data API v2 for trades. Settings "api" was wrongly failing on a
+  // misconfigured CLOB_HTTP_URL /time ping even while the bot worked fine.
   try {
-    const clobUrl = getEnvValue('CLOB_HTTP_URL') || 'https://clob.polymarket.com/';
-    const timeUrl = joinUrl(clobUrl, 'time');
-    const response = await fetch(timeUrl, { method: 'GET' });
+    const configuredClob = getEnvValue('CLOB_HTTP_URL') || 'https://clob.polymarket.com/';
+    const probes: { name: string; url: string }[] = [
+      {
+        name: 'data-api',
+        url: 'https://data-api.polymarket.com/v2/activity?user=0x0000000000000000000000000000000000000001&limit=1',
+      },
+      {
+        name: 'clob',
+        url: 'https://clob.polymarket.com/time',
+      },
+      {
+        name: 'clob-configured',
+        url: joinUrl(configuredClob, 'time'),
+      },
+    ];
 
-    if (!response.ok) {
+    const ok: string[] = [];
+    const failures: string[] = [];
+
+    for (const probe of probes) {
+      try {
+        const response = await fetch(probe.url, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (response.ok) {
+          ok.push(probe.name);
+        } else {
+          failures.push(`${probe.name} ${response.status}`);
+        }
+      } catch (err) {
+        failures.push(
+          `${probe.name}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
+    // Healthy if the APIs the bot actually needs respond
+    if (ok.includes('data-api') || ok.includes('clob')) {
+      result.checks.api = {
+        status: 'ok',
+        message: `OK (${ok.join(', ')})`,
+      };
+    } else {
       result.checks.api = {
         status: 'error',
-        message: `Polymarket API returned ${response.status}`,
+        message: `Polymarket unreachable (${failures.join('; ')})`,
       };
       result.healthy = false;
     }
