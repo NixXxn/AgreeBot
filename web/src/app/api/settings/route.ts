@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BotSettings, SettingsResponse, SettingsUpdate } from '@/types/settings';
+import { getRuntimeOverrides, saveRuntimeOverrides } from '@/lib/runtimeSettings';
 
 const ENV_PATH = path.join(process.cwd(), '..', '.env');
 const REPORTS_DIR = path.join(process.cwd(), '..', 'trader_reports');
@@ -345,17 +346,27 @@ function envFromProcess(): Record<string, string> {
   return env;
 }
 
+async function buildEnvView(): Promise<Record<string, string>> {
+  let env: Record<string, string> = {};
+
+  if (fs.existsSync(ENV_PATH)) {
+    const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
+    env = parseEnvFile(envContent);
+  }
+
+  // Coolify injects vars into process.env
+  env = { ...env, ...envFromProcess() };
+
+  // Dashboard saves win over Coolify (survive container restarts)
+  const overrides = await getRuntimeOverrides();
+  env = { ...env, ...overrides };
+
+  return env;
+}
+
 export async function GET() {
   try {
-    let env: Record<string, string> = {};
-
-    if (fs.existsSync(ENV_PATH)) {
-      const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
-      env = parseEnvFile(envContent);
-    }
-
-    // Coolify injects vars into process.env — merge so dashboard works without a file
-    env = { ...env, ...envFromProcess() };
+    const env = await buildEnvView();
 
     if (Object.keys(env).length === 0) {
       return NextResponse.json(
@@ -385,31 +396,45 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const update: SettingsUpdate = await request.json();
+    const envUpdates = settingsToEnvUpdates(update);
 
-    if (!fs.existsSync(ENV_PATH)) {
+    // Persist to Mongo so Coolify env + entrypoint rewrite cannot wipe traders
+    try {
+      await saveRuntimeOverrides(envUpdates);
+    } catch (mongoError) {
+      console.error('Mongo save failed:', mongoError);
       return NextResponse.json(
-        { error: '.env file not found' },
-        { status: 404 }
+        {
+          error:
+            mongoError instanceof Error
+              ? mongoError.message
+              : 'Failed to persist settings to MongoDB',
+        },
+        { status: 500 }
       );
     }
 
-    const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
-    const envUpdates = settingsToEnvUpdates(update);
-    const newEnvContent = updateEnvFile(envContent, envUpdates);
+    // Best-effort local .env write (useful for non-Docker; overwritten on Coolify restart)
+    try {
+      if (fs.existsSync(ENV_PATH)) {
+        const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
+        const newEnvContent = updateEnvFile(envContent, envUpdates);
+        fs.writeFileSync(ENV_PATH, newEnvContent, 'utf-8');
+      }
+    } catch (fileError) {
+      console.warn('Could not write .env (Mongo save succeeded):', fileError);
+    }
 
-    // Write updated .env file
-    fs.writeFileSync(ENV_PATH, newEnvContent, 'utf-8');
-
-    // Read back and return updated settings
-    const newEnv = parseEnvFile(newEnvContent);
-    const settings = envToSettings(newEnv);
+    const env = await buildEnvView();
+    const settings = envToSettings(env);
     const traderLabels = getTraderLabels();
 
     return NextResponse.json({
       success: true,
       settings,
       traderLabels,
-      message: 'Settings updated. Restart the bot to apply changes.',
+      message:
+        'Settings saved. Restart the bot container so the trading process reloads the new trader list.',
     });
   } catch (error) {
     console.error('Error updating settings:', error);

@@ -69,6 +69,11 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 export const main = async () => {
     try {
         await connectDB();
+
+        // Dashboard edits (traders, strategy, …) live in Mongo and override Coolify env
+        const { applyRuntimeOverrides } = await import('./services/runtimeSettings');
+        await applyRuntimeOverrides();
+
         Logger.startup(USER_ADDRESSES, PROXY_WALLET);
 
         if (ENV.PAPER_MODE) {

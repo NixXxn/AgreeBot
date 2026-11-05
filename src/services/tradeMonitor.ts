@@ -3,29 +3,28 @@ import { getUserActivityModel, getUserPositionModel } from '../models/userHistor
 import { fetchUserActivity, fetchUserPositions } from '../utils/polymarketData';
 import Logger from '../utils/logger';
 
-const USER_ADDRESSES = ENV.USER_ADDRESSES;
-const TOO_OLD_TIMESTAMP = ENV.TOO_OLD_TIMESTAMP;
-const FETCH_INTERVAL = ENV.FETCH_INTERVAL;
+const getUserAddresses = () => ENV.USER_ADDRESSES;
 
-if (!USER_ADDRESSES || USER_ADDRESSES.length === 0) {
-    throw new Error('USER_ADDRESSES is not defined or empty');
-}
-
-// Create activity and position models for each user
-const userModels = USER_ADDRESSES.map((address) => ({
-    address,
-    UserActivity: getUserActivityModel(address),
-    UserPosition: getUserPositionModel(address),
-}));
+const getUserModels = () =>
+    getUserAddresses().map((address) => ({
+        address,
+        UserActivity: getUserActivityModel(address),
+        UserPosition: getUserPositionModel(address),
+    }));
 
 const init = async () => {
+    const addresses = getUserAddresses();
+    if (!addresses || addresses.length === 0) {
+        throw new Error('USER_ADDRESSES is not defined or empty');
+    }
+
     const counts: number[] = [];
-    for (const { address, UserActivity } of userModels) {
+    for (const { address, UserActivity } of getUserModels()) {
         const count = await UserActivity.countDocuments();
         counts.push(count);
     }
     Logger.clearLine();
-    Logger.dbConnection(USER_ADDRESSES, counts);
+    Logger.dbConnection(addresses, counts);
 
     // Show your own positions first (skipped in paper mode without a wallet)
     if (ENV.PROXY_WALLET) {
@@ -81,7 +80,7 @@ const init = async () => {
     const positionCounts: number[] = [];
     const positionDetails: any[][] = [];
     const profitabilities: number[] = [];
-    for (const { address, UserPosition } of userModels) {
+    for (const { address, UserPosition } of getUserModels()) {
         const positions = await UserPosition.find().exec();
         positionCounts.push(positions.length);
 
@@ -105,14 +104,14 @@ const init = async () => {
         positionDetails.push(topPositions);
     }
     Logger.clearLine();
-    Logger.tradersPositions(USER_ADDRESSES, positionCounts, positionDetails, profitabilities);
+    Logger.tradersPositions(getUserAddresses(), positionCounts, positionDetails, profitabilities);
 };
 
 const fetchTradeData = async () => {
     // Cutoff: ignore activity older than TOO_OLD_TIMESTAMP hours
-    const cutoffEpoch = Math.floor(Date.now() / 1000) - TOO_OLD_TIMESTAMP * 3600;
+    const cutoffEpoch = Math.floor(Date.now() / 1000) - ENV.TOO_OLD_TIMESTAMP * 3600;
 
-    for (const { address, UserActivity, UserPosition } of userModels) {
+    for (const { address, UserActivity, UserPosition } of getUserModels()) {
         try {
             // Data API v2 — legacy /activity returns 410
             const activities = await fetchUserActivity(address, { type: 'TRADE', limit: 100 });
@@ -233,13 +232,15 @@ export const stopTradeMonitor = () => {
 
 const tradeMonitor = async () => {
     await init();
-    Logger.success(`Monitoring ${USER_ADDRESSES.length} trader(s) every ${FETCH_INTERVAL}s`);
+    Logger.success(
+        `Monitoring ${getUserAddresses().length} trader(s) every ${ENV.FETCH_INTERVAL}s`
+    );
     Logger.separator();
 
     // On first run, mark all existing historical trades as already processed
     if (isFirstRun) {
         Logger.info('First run: marking all historical trades as processed...');
-        for (const { address, UserActivity } of userModels) {
+        for (const { address, UserActivity } of getUserModels()) {
             const count = await UserActivity.updateMany(
                 { bot: false },
                 { $set: { bot: true, botExcutedTime: 999 } }
@@ -258,7 +259,7 @@ const tradeMonitor = async () => {
     while (isRunning) {
         await fetchTradeData();
         if (!isRunning) break;
-        await new Promise((resolve) => setTimeout(resolve, FETCH_INTERVAL * 1000));
+        await new Promise((resolve) => setTimeout(resolve, ENV.FETCH_INTERVAL * 1000));
     }
 
     Logger.info('Trade monitor stopped');

@@ -16,18 +16,16 @@ import {
 } from './consensus';
 import { recordBotSignal } from './botSignals';
 
-const USER_ADDRESSES = ENV.USER_ADDRESSES;
 const PROXY_WALLET = ENV.PROXY_WALLET;
-const TRADE_AGGREGATION_ENABLED = ENV.TRADE_AGGREGATION_ENABLED;
-const TRADE_AGGREGATION_WINDOW_SECONDS = ENV.TRADE_AGGREGATION_WINDOW_SECONDS;
 const TRADE_AGGREGATION_MIN_TOTAL_USD = 1.0; // Polymarket minimum
-const CONSENSUS_ENABLED = ENV.CONSENSUS_ENABLED;
 
-// Create activity models for each user
-const userActivityModels = USER_ADDRESSES.map((address) => ({
-    address,
-    model: getUserActivityModel(address),
-}));
+const getUserAddresses = () => ENV.USER_ADDRESSES;
+
+const getUserActivityModels = () =>
+    getUserAddresses().map((address) => ({
+        address,
+        model: getUserActivityModel(address),
+    }));
 
 interface AggregatedTrade {
     userAddress: string;
@@ -49,7 +47,7 @@ const tradeAggregationBuffer: Map<string, AggregatedTrade> = new Map();
 const readTempTrades = async (): Promise<TradeWithUser[]> => {
     const allTrades: TradeWithUser[] = [];
 
-    for (const { address, model } of userActivityModels) {
+    for (const { address, model } of getUserActivityModels()) {
         // Only get trades that haven't been processed yet (bot: false AND botExcutedTime: 0)
         // This prevents processing the same trade multiple times
         const trades = await model
@@ -119,7 +117,7 @@ const addToAggregationBuffer = (trade: TradeWithUser): void => {
 const getReadyAggregatedTrades = (): AggregatedTrade[] => {
     const ready: AggregatedTrade[] = [];
     const now = Date.now();
-    const windowMs = TRADE_AGGREGATION_WINDOW_SECONDS * 1000;
+    const windowMs = ENV.TRADE_AGGREGATION_WINDOW_SECONDS * 1000;
 
     for (const [key, agg] of tradeAggregationBuffer.entries()) {
         const timeElapsed = now - agg.firstTradeTime;
@@ -430,19 +428,19 @@ export const stopTradeExecutor = () => {
 };
 
 const tradeExecutor = async (clobClient: ClobClient | null) => {
-    Logger.success(`Trade executor ready for ${USER_ADDRESSES.length} trader(s)`);
+    Logger.success(`Trade executor ready for ${getUserAddresses().length} trader(s)`);
     if (ENV.PAPER_MODE) {
         Logger.warning('PAPER MODE — signals logged only, no live orders');
     }
-    if (CONSENSUS_ENABLED) {
+    if (ENV.CONSENSUS_ENABLED) {
         Logger.info(
             `Consensus mode ON: need ${ENV.CONSENSUS_MIN_AGREEMENT}+ traders to agree ` +
                 `within ${ENV.CONSENSUS_WINDOW_SECONDS}s (apply to ${ENV.CONSENSUS_APPLY_TO}, size ${ENV.CONSENSUS_SIZE_MODE})`
         );
     }
-    if (TRADE_AGGREGATION_ENABLED) {
+    if (ENV.TRADE_AGGREGATION_ENABLED) {
         Logger.info(
-            `Trade aggregation enabled: ${TRADE_AGGREGATION_WINDOW_SECONDS}s window, $${TRADE_AGGREGATION_MIN_TOTAL_USD} minimum`
+            `Trade aggregation enabled: ${ENV.TRADE_AGGREGATION_WINDOW_SECONDS}s window, $${TRADE_AGGREGATION_MIN_TOTAL_USD} minimum`
         );
     }
 
@@ -451,7 +449,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
         const trades = await readTempTrades();
 
         // --- Consensus path ---
-        if (CONSENSUS_ENABLED && trades.length > 0) {
+        if (ENV.CONSENSUS_ENABLED && trades.length > 0) {
             const consensusTrades: TradeWithUser[] = [];
             const immediateTrades: TradeWithUser[] = [];
 
@@ -476,7 +474,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
 
             // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) execute normally
             if (immediateTrades.length > 0) {
-                if (TRADE_AGGREGATION_ENABLED) {
+                if (ENV.TRADE_AGGREGATION_ENABLED) {
                     for (const trade of immediateTrades) {
                         if (trade.side === 'BUY' && trade.usdcSize < TRADE_AGGREGATION_MIN_TOTAL_USD) {
                             addToAggregationBuffer(trade);
@@ -490,7 +488,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
             }
 
             lastCheck = Date.now();
-        } else if (!CONSENSUS_ENABLED && TRADE_AGGREGATION_ENABLED) {
+        } else if (!ENV.CONSENSUS_ENABLED && ENV.TRADE_AGGREGATION_ENABLED) {
             // Process with aggregation logic (original)
             if (trades.length > 0) {
                 Logger.clearLine();
@@ -515,7 +513,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
                 }
                 lastCheck = Date.now();
             }
-        } else if (!CONSENSUS_ENABLED) {
+        } else if (!ENV.CONSENSUS_ENABLED) {
             // Original non-aggregation logic
             if (trades.length > 0) {
                 Logger.clearLine();
@@ -528,7 +526,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
         }
 
         // Evaluate consensus buffer every loop
-        if (CONSENSUS_ENABLED) {
+        if (ENV.CONSENSUS_ENABLED) {
             const { ready } = await evaluateConsensusBuffer();
             if (ready.length > 0) {
                 Logger.clearLine();
@@ -538,7 +536,7 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
         }
 
         // Check for ready aggregated trades
-        if (TRADE_AGGREGATION_ENABLED) {
+        if (ENV.TRADE_AGGREGATION_ENABLED) {
             const readyAggregations = getReadyAggregatedTrades();
             if (readyAggregations.length > 0) {
                 Logger.clearLine();
@@ -553,17 +551,18 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
         // Waiting message
         if (Date.now() - lastCheck > 300) {
             const pendingParts: string[] = [];
-            if (CONSENSUS_ENABLED) {
+            if (ENV.CONSENSUS_ENABLED) {
                 const n = getConsensusBufferSize();
                 if (n > 0) pendingParts.push(`${n} consensus group(s)`);
             }
-            if (TRADE_AGGREGATION_ENABLED && tradeAggregationBuffer.size > 0) {
+            if (ENV.TRADE_AGGREGATION_ENABLED && tradeAggregationBuffer.size > 0) {
                 pendingParts.push(`${tradeAggregationBuffer.size} aggregation(s)`);
             }
+            const traderCount = getUserAddresses().length;
             if (pendingParts.length > 0) {
-                Logger.waiting(USER_ADDRESSES.length, pendingParts.join(', '));
+                Logger.waiting(traderCount, pendingParts.join(', '));
             } else {
-                Logger.waiting(USER_ADDRESSES.length);
+                Logger.waiting(traderCount);
             }
             lastCheck = Date.now();
         }
