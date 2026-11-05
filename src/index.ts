@@ -95,6 +95,13 @@ export const main = async () => {
             Logger.warning('Health check failed, but continuing startup...');
         }
 
+        if (ENV.PAPER_MODE) {
+            const { cleanupOrphanPaperSells } = await import('./services/cleanupOrphanSells');
+            const { loadPaperPositionsFromDb } = await import('./services/paperPositions');
+            await cleanupOrphanPaperSells();
+            await loadPaperPositionsFromDb();
+        }
+
         let clobClient: ClobClient | null = null;
         if (ENV.PAPER_MODE) {
             Logger.info('Skipping CLOB client (paper mode — no private key required)');

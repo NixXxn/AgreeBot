@@ -4,6 +4,11 @@ import { UserActivityInterface, UserPositionInterface } from '../interfaces/User
 import { getUserActivityModel } from '../models/userHistory';
 import Logger from './logger';
 import { calculateOrderSize, getTradeMultiplier } from '../config/copyStrategy';
+import {
+    applyPaperFill,
+    getPaperPosition,
+    hasOpenPaperPosition,
+} from '../services/paperPositions';
 
 const RETRY_LIMIT = ENV.RETRY_LIMIT;
 const COPY_STRATEGY_CONFIG = ENV.COPY_STRATEGY_CONFIG;
@@ -83,25 +88,62 @@ const postOrder = async (
 
     // Paper / preview mode: log the signal and mark processed — never place orders
     if (ENV.PAPER_MODE || !clobClient) {
+        const side = condition === 'sell' ? 'SELL' : 'BUY';
+
+        // Never paper-SELL without a prior paper BUY on this asset
+        if (side === 'SELL' && !hasOpenPaperPosition(trade.asset)) {
+            Logger.warning(
+                `[PAPER] Skip SELL — no open position for ` +
+                    `${trade.outcome || trade.asset.slice(0, 12)}… ` +
+                    `(need a prior entered BUY first)`
+            );
+            await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+            return { executed: false, sizeUsd: 0, paper: true };
+        }
+
         // Virtual balance for sizing (PAPER_BALANCE_USD, or real wallet balance if set)
         const paperBalance = my_balance > 0 ? my_balance : ENV.PAPER_BALANCE_USD;
+        const paperPos = getPaperPosition(trade.asset);
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             paperBalance,
-            my_position?.currentValue || 0,
+            paperPos?.sizeUsd || my_position?.currentValue || 0,
             { marketPrice: trade.price }
         );
+
+        let sizeUsd = orderSize.finalAmount;
+        if (side === 'SELL' && paperPos) {
+            // Cap sell to what we actually hold in the paper book
+            sizeUsd = Math.min(sizeUsd, paperPos.sizeUsd);
+            if (sizeUsd < MIN_ORDER_SIZE_USD) {
+                Logger.warning(
+                    `[PAPER] Skip SELL — paper position too small ($${paperPos.sizeUsd.toFixed(2)})`
+                );
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+                return { executed: false, sizeUsd: 0, paper: true };
+            }
+        }
+
+        const filled = applyPaperFill(
+            side,
+            trade.asset,
+            trade.conditionId,
+            sizeUsd,
+            trade.price,
+            { title: trade.title, outcome: trade.outcome }
+        );
+
         Logger.warning(
             `[PAPER] Would ${condition.toUpperCase()} ` +
                 `${trade.outcome || trade.asset.slice(0, 12)}… ` +
-                `~$${orderSize.finalAmount.toFixed(2)} ` +
+                `~$${filled.sizeUsd.toFixed(2)} ` +
                 `@ ${trade.price} on ${trade.slug || trade.eventSlug || 'market'} ` +
                 `(budget $${paperBalance.toFixed(0)}) ` +
                 `(from ${userAddress.slice(0, 6)}…${userAddress.slice(-4)}) — ${orderSize.reasoning}`
         );
         await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
-        return { executed: true, sizeUsd: orderSize.finalAmount, paper: true };
+        return { executed: filled.sizeUsd > 0, sizeUsd: filled.sizeUsd, paper: true };
     }
 
     //Merge strategy
@@ -338,7 +380,7 @@ const postOrder = async (
         if (!my_position) {
             Logger.warning('No position to sell');
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return;
+            return { executed: false, sizeUsd: 0, paper: false };
         }
 
         // Get all previous BUY trades for this asset to calculate total bought

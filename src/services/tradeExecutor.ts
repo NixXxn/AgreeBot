@@ -203,20 +203,27 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             trade.userAddress
         );
 
+        const side = (trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL';
+        // Paper always returns a result; live success still often returns void → treat as executed
+        const executed = orderResult ? orderResult.executed : true;
         await recordBotSignal({
             conditionId: trade.conditionId,
             asset: trade.asset,
-            side: (trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
+            side,
             title: trade.title,
             slug: trade.slug,
             eventSlug: trade.eventSlug,
             outcome: trade.outcome,
             entryPrice: trade.price,
-            sizeUsd: orderResult?.sizeUsd ?? trade.usdcSize,
+            sizeUsd: orderResult?.sizeUsd ?? (executed ? trade.usdcSize : 0),
             agreementCount: 1,
             agreeingTraders: [trade.userAddress],
-            entered: true,
-            reason: 'copy',
+            entered: executed,
+            reason: executed
+                ? 'copy'
+                : side === 'SELL'
+                  ? 'no_position'
+                  : 'skipped',
             paper: orderResult?.paper ?? ENV.PAPER_MODE,
         });
 
@@ -284,6 +291,7 @@ const doConsensusTrading = async (
             ready.referenceTrader
         );
 
+        const executed = orderResult ? orderResult.executed : true;
         await recordBotSignal({
             conditionId: ready.trade.conditionId,
             asset: ready.trade.asset,
@@ -293,11 +301,11 @@ const doConsensusTrading = async (
             eventSlug: ready.trade.eventSlug,
             outcome: ready.trade.outcome,
             entryPrice: ready.trade.price,
-            sizeUsd: orderResult?.sizeUsd ?? ready.trade.usdcSize,
+            sizeUsd: orderResult?.sizeUsd ?? (executed ? ready.trade.usdcSize : 0),
             agreementCount: ready.agreeingTraders.length,
             agreeingTraders: ready.agreeingTraders,
-            entered: true,
-            reason: 'consensus',
+            entered: executed,
+            reason: executed ? 'consensus' : 'skipped',
             minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
             paper: orderResult?.paper ?? ENV.PAPER_MODE,
         });
@@ -378,6 +386,7 @@ const doAggregatedTrading = async (
             agg.userAddress
         );
 
+        const executed = orderResult ? orderResult.executed : true;
         await recordBotSignal({
             conditionId: agg.conditionId,
             asset: agg.asset,
@@ -387,11 +396,11 @@ const doAggregatedTrading = async (
             eventSlug: agg.eventSlug,
             outcome: agg.trades[0]?.outcome,
             entryPrice: agg.averagePrice,
-            sizeUsd: orderResult?.sizeUsd ?? agg.totalUsdcSize,
+            sizeUsd: orderResult?.sizeUsd ?? (executed ? agg.totalUsdcSize : 0),
             agreementCount: 1,
             agreeingTraders: [agg.userAddress],
-            entered: true,
-            reason: 'aggregated',
+            entered: executed,
+            reason: executed ? 'aggregated' : 'skipped',
             paper: orderResult?.paper ?? ENV.PAPER_MODE,
         });
 
