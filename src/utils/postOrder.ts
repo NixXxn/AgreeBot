@@ -77,8 +77,8 @@ const postOrder = async (
 
     // Paper / preview mode: log the signal and mark processed — never place orders
     if (ENV.PAPER_MODE || !clobClient) {
-        // Use virtual balance so size calc isn't zeroed when no wallet is configured
-        const paperBalance = my_balance > 0 ? my_balance : 10_000;
+        // Virtual balance for sizing (PAPER_BALANCE_USD, or real wallet balance if set)
+        const paperBalance = my_balance > 0 ? my_balance : ENV.PAPER_BALANCE_USD;
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
@@ -90,6 +90,7 @@ const postOrder = async (
                 `${trade.outcome || trade.asset.slice(0, 12)}… ` +
                 `~$${orderSize.finalAmount.toFixed(2)} ` +
                 `@ ${trade.price} on ${trade.slug || trade.eventSlug || 'market'} ` +
+                `(budget $${paperBalance.toFixed(0)}) ` +
                 `(from ${userAddress.slice(0, 6)}…${userAddress.slice(-4)}) — ${orderSize.reasoning}`
         );
         await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });

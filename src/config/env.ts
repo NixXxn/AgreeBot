@@ -391,6 +391,8 @@ export const ENV = {
     PAPER_MODE: PAPER_MODE_ENABLED,
     /** Alias of PAPER_MODE (legacy name) */
     PREVIEW_MODE: PAPER_MODE_ENABLED,
+    /** Virtual USDC balance used for sizing when PAPER_MODE and no real wallet balance */
+    PAPER_BALANCE_USD: parseFloat(process.env.PAPER_BALANCE_USD || '10000'),
     FETCH_INTERVAL: parseInt(process.env.FETCH_INTERVAL || '1', 10),
     TOO_OLD_TIMESTAMP: parseInt(process.env.TOO_OLD_TIMESTAMP || '24', 10),
     RETRY_LIMIT: parseInt(process.env.RETRY_LIMIT || '3', 10),
