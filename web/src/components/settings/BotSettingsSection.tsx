@@ -24,6 +24,22 @@ export function BotSettingsSection({
   onBotSettingsChange,
   onNetworkChange,
 }: BotSettingsSectionProps) {
+  // Harden against partial API payloads (Coolify / older deploys)
+  const safe = {
+    ...botSettings,
+    tradeAggregationEnabled: Boolean(botSettings?.tradeAggregationEnabled),
+    tradeAggregationWindowSeconds: botSettings?.tradeAggregationWindowSeconds ?? 300,
+    previewMode: Boolean(botSettings?.previewMode),
+    consensusEnabled: Boolean(botSettings?.consensusEnabled),
+    consensusMinAgreement: botSettings?.consensusMinAgreement ?? 2,
+    consensusWindowSeconds: botSettings?.consensusWindowSeconds ?? 300,
+    consensusApplyTo: botSettings?.consensusApplyTo ?? 'BUY',
+    consensusSizeMode: botSettings?.consensusSizeMode ?? 'AVERAGE',
+    fetchInterval: botSettings?.fetchInterval ?? 1,
+    tooOldTimestamp: botSettings?.tooOldTimestamp ?? 24,
+    retryLimit: botSettings?.retryLimit ?? 3,
+  };
+
   const truncateAddress = (address: string): string => {
     if (!address) return 'Not configured';
     return `${address.slice(0, 10)}...${address.slice(-8)}`;
@@ -36,8 +52,8 @@ export function BotSettingsSection({
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
             Bot Mode
-            {botSettings.previewMode ? (
-              <Badge variant="warning">Preview Mode</Badge>
+            {safe.previewMode ? (
+              <Badge variant="warning">Paper / Preview</Badge>
             ) : (
               <Badge variant="success">Live Trading</Badge>
             )}
@@ -48,9 +64,9 @@ export function BotSettingsSection({
         </CardHeader>
         <CardContent>
           <Switch
-            checked={botSettings.previewMode}
+            checked={safe.previewMode}
             onCheckedChange={(checked) => onBotSettingsChange({ previewMode: checked })}
-            label="Preview Mode"
+            label="Paper / Preview Mode"
             description="Monitor trades but don't execute them (safe testing)"
           />
         </CardContent>
@@ -105,14 +121,14 @@ export function BotSettingsSection({
               label="Fetch Interval (seconds)"
               type="number"
               min={1}
-              value={botSettings.fetchInterval}
+              value={safe.fetchInterval}
               onChange={(e) => onBotSettingsChange({ fetchInterval: parseInt(e.target.value) || 1 })}
             />
             <Input
               label="Ignore Trades Older Than (hours)"
               type="number"
               min={1}
-              value={botSettings.tooOldTimestamp}
+              value={safe.tooOldTimestamp}
               onChange={(e) => onBotSettingsChange({ tooOldTimestamp: parseInt(e.target.value) || 24 })}
             />
             <Input
@@ -120,25 +136,25 @@ export function BotSettingsSection({
               type="number"
               min={1}
               max={10}
-              value={botSettings.retryLimit}
+              value={safe.retryLimit}
               onChange={(e) => onBotSettingsChange({ retryLimit: parseInt(e.target.value) || 3 })}
             />
           </div>
 
           <div className="border-t pt-4 space-y-4">
             <Switch
-              checked={botSettings.tradeAggregationEnabled}
+              checked={safe.tradeAggregationEnabled}
               onCheckedChange={(checked) => onBotSettingsChange({ tradeAggregationEnabled: checked })}
               label="Trade Aggregation"
               description="Combine multiple small trades into one larger trade"
             />
 
-            {botSettings.tradeAggregationEnabled && (
+            {safe.tradeAggregationEnabled && (
               <Input
                 label="Aggregation Window (seconds)"
                 type="number"
                 min={60}
-                value={botSettings.tradeAggregationWindowSeconds}
+                value={safe.tradeAggregationWindowSeconds}
                 onChange={(e) => onBotSettingsChange({
                   tradeAggregationWindowSeconds: parseInt(e.target.value) || 300
                 })}
@@ -148,19 +164,19 @@ export function BotSettingsSection({
 
           <div className="border-t pt-4 space-y-4">
             <Switch
-              checked={botSettings.consensusEnabled}
+              checked={safe.consensusEnabled}
               onCheckedChange={(checked) => onBotSettingsChange({ consensusEnabled: checked })}
               label="Consensus Mode"
               description="Only enter a trade when enough tracked traders agree on the same outcome"
             />
 
-            {botSettings.consensusEnabled && (
+            {safe.consensusEnabled && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
                   label="Min Traders Agreeing"
                   type="number"
                   min={1}
-                  value={botSettings.consensusMinAgreement}
+                  value={safe.consensusMinAgreement}
                   onChange={(e) => onBotSettingsChange({
                     consensusMinAgreement: parseInt(e.target.value) || 2
                   })}
@@ -169,14 +185,14 @@ export function BotSettingsSection({
                   label="Consensus Window (seconds)"
                   type="number"
                   min={10}
-                  value={botSettings.consensusWindowSeconds}
+                  value={safe.consensusWindowSeconds}
                   onChange={(e) => onBotSettingsChange({
                     consensusWindowSeconds: parseInt(e.target.value) || 300
                   })}
                 />
                 <Select
                   label="Apply Consensus To"
-                  value={botSettings.consensusApplyTo}
+                  value={safe.consensusApplyTo}
                   onValueChange={(value) => onBotSettingsChange({
                     consensusApplyTo: value as BotSettings['botSettings']['consensusApplyTo']
                   })}
@@ -188,7 +204,7 @@ export function BotSettingsSection({
                 />
                 <Select
                   label="Order Size From Agreement"
-                  value={botSettings.consensusSizeMode}
+                  value={safe.consensusSizeMode}
                   onValueChange={(value) => onBotSettingsChange({
                     consensusSizeMode: value as BotSettings['botSettings']['consensusSizeMode']
                   })}

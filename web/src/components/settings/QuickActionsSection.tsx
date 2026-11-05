@@ -87,33 +87,40 @@ export function QuickActionsSection({ healthCheck, onRefreshHealth }: QuickActio
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {healthCheck ? (
+          {healthCheck?.checks ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {Object.entries(healthCheck.checks).map(([key, check]) => (
+              {Object.entries(healthCheck.checks).map(([key, check]) => {
+                const status = check?.status ?? 'error';
+                const value =
+                  check && 'value' in check && typeof check.value === 'number'
+                    ? check.value
+                    : undefined;
+                return (
                 <div
                   key={key}
                   className={`p-3 rounded-lg border ${
-                    check.status === 'ok' ? 'border-green-500/30 bg-green-500/5' :
-                    check.status === 'warning' ? 'border-yellow-500/30 bg-yellow-500/5' :
+                    status === 'ok' ? 'border-green-500/30 bg-green-500/5' :
+                    status === 'warning' ? 'border-yellow-500/30 bg-yellow-500/5' :
                     'border-red-500/30 bg-red-500/5'
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`w-2 h-2 rounded-full ${
-                      check.status === 'ok' ? 'bg-green-500' :
-                      check.status === 'warning' ? 'bg-yellow-500' :
+                      status === 'ok' ? 'bg-green-500' :
+                      status === 'warning' ? 'bg-yellow-500' :
                       'bg-red-500'
                     }`} />
                     <span className="text-sm font-medium capitalize">{key}</span>
                   </div>
-                  {check.message && (
+                  {check?.message && (
                     <p className="text-xs text-muted-foreground">{check.message}</p>
                   )}
-                  {'value' in check && check.value !== undefined && (
-                    <p className="text-sm font-mono">${check.value.toFixed(2)}</p>
+                  {value !== undefined && (
+                    <p className="text-sm font-mono">${value.toFixed(2)}</p>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Loading health status...</p>

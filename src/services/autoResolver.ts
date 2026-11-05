@@ -1,7 +1,7 @@
 import { AssetType, ClobClient, OrderType, Side } from '@polymarket/clob-client';
 import { ethers } from 'ethers';
 import { ENV } from '../config/env';
-import fetchData from '../utils/fetchData';
+import { fetchUserPositions } from '../utils/polymarketData';
 import Logger from '../utils/logger';
 
 const PROXY_WALLET = ENV.PROXY_WALLET;
@@ -285,9 +285,19 @@ const redeemPosition = async (position: Position): Promise<{ success: boolean; e
 };
 
 const loadPositions = async (address: string): Promise<Position[]> => {
-    const url = `https://data-api.polymarket.com/positions?user=${address}`;
-    const data = await fetchData(url);
-    const positions = Array.isArray(data) ? (data as Position[]) : [];
+    const data = await fetchUserPositions(address);
+    const positions: Position[] = data.map((pos) => ({
+        asset: pos.asset,
+        conditionId: pos.conditionId,
+        size: pos.size,
+        avgPrice: pos.avgPrice,
+        currentValue: pos.currentValue,
+        curPrice: pos.curPrice,
+        title: pos.title,
+        outcome: pos.outcome,
+        slug: pos.slug,
+        redeemable: pos.redeemable,
+    }));
     return positions.filter((pos) => (pos.size || 0) > ZERO_THRESHOLD);
 };
 

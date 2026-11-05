@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { ENV } from '../config/env';
 import getMyBalance from './getMyBalance';
-import fetchData from './fetchData';
+import { fetchUserPositions } from './polymarketData';
 import Logger from './logger';
 
 export interface HealthCheckResult {
@@ -118,12 +118,10 @@ export const performHealthCheck = async (): Promise<HealthCheckResult> => {
         }
     }
 
-    // Check Polymarket API
+    // Check Polymarket Data API v2
     try {
-        const testUrl =
-            'https://data-api.polymarket.com/positions?user=0x0000000000000000000000000000000000000000';
-        await fetchData(testUrl);
-        checks.polymarketApi = { status: 'ok', message: 'API responding' };
+        await fetchUserPositions('0x0000000000000000000000000000000000000001', { limit: 1 });
+        checks.polymarketApi = { status: 'ok', message: 'Data API v2 responding' };
     } catch (error) {
         checks.polymarketApi = {
             status: 'error',

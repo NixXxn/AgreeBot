@@ -90,12 +90,16 @@ function envToSettings(env: Record<string, string>): BotSettings {
       retryLimit: parseInt(env.RETRY_LIMIT || '3', 10),
       tradeAggregationEnabled: env.TRADE_AGGREGATION_ENABLED === 'true',
       tradeAggregationWindowSeconds: parseInt(env.TRADE_AGGREGATION_WINDOW_SECONDS || '300', 10),
-      previewMode: env.PREVIEW_MODE === 'true',
+      previewMode: env.PREVIEW_MODE === 'true' || env.PAPER_MODE === 'true',
       consensusEnabled: env.CONSENSUS_ENABLED === 'true',
-      consensusMinAgreement: parseInt(env.CONSENSUS_MIN_AGREEMENT || '2', 10),
-      consensusWindowSeconds: parseInt(env.CONSENSUS_WINDOW_SECONDS || '300', 10),
-      consensusApplyTo: (env.CONSENSUS_APPLY_TO || 'BUY').toUpperCase() as BotSettings['botSettings']['consensusApplyTo'],
-      consensusSizeMode: (env.CONSENSUS_SIZE_MODE || 'AVERAGE').toUpperCase() as BotSettings['botSettings']['consensusSizeMode'],
+      consensusMinAgreement: parseInt(env.CONSENSUS_MIN_AGREEMENT || '2', 10) || 2,
+      consensusWindowSeconds: parseInt(env.CONSENSUS_WINDOW_SECONDS || '300', 10) || 300,
+      consensusApplyTo: (['BUY', 'SELL', 'BOTH'].includes((env.CONSENSUS_APPLY_TO || 'BUY').toUpperCase())
+        ? (env.CONSENSUS_APPLY_TO || 'BUY').toUpperCase()
+        : 'BUY') as BotSettings['botSettings']['consensusApplyTo'],
+      consensusSizeMode: (['AVERAGE', 'LARGEST', 'FIRST', 'MEDIAN'].includes((env.CONSENSUS_SIZE_MODE || 'AVERAGE').toUpperCase())
+        ? (env.CONSENSUS_SIZE_MODE || 'AVERAGE').toUpperCase()
+        : 'AVERAGE') as BotSettings['botSettings']['consensusSizeMode'],
     },
     network: {
       requestTimeoutMs: parseInt(env.REQUEST_TIMEOUT_MS || '10000', 10),

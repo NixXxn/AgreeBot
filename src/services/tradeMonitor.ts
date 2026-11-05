@@ -1,6 +1,6 @@
 import { ENV } from '../config/env';
 import { getUserActivityModel, getUserPositionModel } from '../models/userHistory';
-import fetchData from '../utils/fetchData';
+import { fetchUserActivity, fetchUserPositions } from '../utils/polymarketData';
 import Logger from '../utils/logger';
 
 const USER_ADDRESSES = ENV.USER_ADDRESSES;
@@ -30,19 +30,18 @@ const init = async () => {
     // Show your own positions first (skipped in paper mode without a wallet)
     if (ENV.PROXY_WALLET) {
         try {
-            const myPositionsUrl = `https://data-api.polymarket.com/positions?user=${ENV.PROXY_WALLET}`;
-            const myPositions = await fetchData(myPositionsUrl);
+            const myPositions = await fetchUserPositions(ENV.PROXY_WALLET);
 
             // Get current USDC balance
             const getMyBalance = (await import('../utils/getMyBalance')).default;
             const currentBalance = await getMyBalance(ENV.PROXY_WALLET);
 
-            if (Array.isArray(myPositions) && myPositions.length > 0) {
+            if (myPositions.length > 0) {
                 // Calculate your overall profitability and initial investment
                 let totalValue = 0;
                 let initialValue = 0;
                 let weightedPnl = 0;
-                myPositions.forEach((pos: any) => {
+                myPositions.forEach((pos) => {
                     const value = pos.currentValue || 0;
                     const initial = pos.initialValue || 0;
                     const pnl = pos.percentPnl || 0;
@@ -53,8 +52,8 @@ const init = async () => {
                 const myOverallPnl = totalValue > 0 ? weightedPnl / totalValue : 0;
 
                 // Get top 5 positions by profitability (PnL)
-                const myTopPositions = myPositions
-                    .sort((a: any, b: any) => (b.percentPnl || 0) - (a.percentPnl || 0))
+                const myTopPositions = [...myPositions]
+                    .sort((a, b) => (b.percentPnl || 0) - (a.percentPnl || 0))
                     .slice(0, 5);
 
                 Logger.clearLine();
@@ -110,20 +109,22 @@ const init = async () => {
 };
 
 const fetchTradeData = async () => {
+    // Cutoff: ignore activity older than TOO_OLD_TIMESTAMP hours
+    const cutoffEpoch = Math.floor(Date.now() / 1000) - TOO_OLD_TIMESTAMP * 3600;
+
     for (const { address, UserActivity, UserPosition } of userModels) {
         try {
-            // Fetch trade activities from Polymarket API
-            const apiUrl = `https://data-api.polymarket.com/activity?user=${address}&type=TRADE`;
-            const activities = await fetchData(apiUrl);
+            // Data API v2 — legacy /activity returns 410
+            const activities = await fetchUserActivity(address, { type: 'TRADE', limit: 100 });
 
-            if (!Array.isArray(activities) || activities.length === 0) {
+            if (activities.length === 0) {
                 continue;
             }
 
             // Process each activity
             for (const activity of activities) {
                 // Skip if too old
-                if (activity.timestamp < TOO_OLD_TIMESTAMP) {
+                if (activity.timestamp < cutoffEpoch) {
                     continue;
                 }
 
@@ -168,10 +169,9 @@ const fetchTradeData = async () => {
             }
 
             // Also fetch and update positions
-            const positionsUrl = `https://data-api.polymarket.com/positions?user=${address}`;
-            const positions = await fetchData(positionsUrl);
+            const positions = await fetchUserPositions(address);
 
-            if (Array.isArray(positions) && positions.length > 0) {
+            if (positions.length > 0) {
                 for (const position of positions) {
                     // Update or create position
                     await UserPosition.findOneAndUpdate(
@@ -207,6 +207,9 @@ const fetchTradeData = async () => {
                     );
                 }
             }
+
+            // Light throttle — 50 wallets × every second hammers the API
+            await new Promise((resolve) => setTimeout(resolve, 150));
         } catch (error) {
             Logger.error(
                 `Error fetching data for ${address.slice(0, 6)}...${address.slice(-4)}: ${error}`

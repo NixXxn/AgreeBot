@@ -31,12 +31,59 @@ export async function GET(request: Request) {
   }
 }
 
+function getEnvValue(key: string): string {
+  if (process.env[key]) return process.env[key] as string;
+  try {
+    const envPath = path.join(process.cwd(), '..', '.env');
+    if (!fs.existsSync(envPath)) return '';
+    const match = fs.readFileSync(envPath, 'utf-8').match(new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm'));
+    if (!match) return '';
+    let v = match[1].trim();
+    if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) {
+      v = v.slice(1, -1);
+    }
+    return v;
+  } catch {
+    return '';
+  }
+}
+
 async function fetchLiveData(reportsDir: string) {
   const summaryPath = path.join(reportsDir, '_SUMMARY.json');
+  const paperMode =
+    getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
+  const proxyWallet = getEnvValue('PROXY_WALLET');
+
+  // Paper mode / no wallet: return an empty but valid payload (no analyze required)
+  if (!fs.existsSync(summaryPath) && (paperMode || !proxyWallet)) {
+    return NextResponse.json({
+      analysisDate: new Date().toISOString(),
+      myWallet: proxyWallet || null,
+      paperMode: true,
+      summary: {
+        totalCopiedTrades: 0,
+        copyBuyCount: 0,
+        copySellCount: 0,
+        totalCopyVolume: 0,
+        matchedBuyVolume: 0,
+        matchedSellVolume: 0,
+        estimatedCopyPnL: 0,
+        positionsPnL: 0,
+      },
+      byTrader: [],
+      trades: [],
+      message: paperMode
+        ? 'Paper mode — no live copy trades yet. Signals appear in bot logs as [PAPER] Would …'
+        : 'No PROXY_WALLET configured. Set a wallet or run npm run analyze for historical reports.',
+    });
+  }
 
   if (!fs.existsSync(summaryPath)) {
     return NextResponse.json(
-      { error: 'Run npm run analyze first to generate trader data' },
+      {
+        error:
+          'No trade reports yet. In paper mode this tab stays empty until you go live, or run npm run analyze locally.',
+      },
       { status: 404 }
     );
   }
@@ -237,28 +284,75 @@ interface Position {
   outcome: string;
 }
 
+function unwrapData(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: Record<string, unknown>[] }).data;
+  }
+  return [];
+}
+
 async function fetchPositions(address: string): Promise<Position[]> {
-  const url = `https://data-api.polymarket.com/positions?user=${address}`;
+  const url = `https://data-api.polymarket.com/v2/positions?user=${address}&limit=500`;
   const response = await fetch(url);
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
+  const payload = await response.json();
+  return unwrapData(payload).map((row) => ({
+    asset: String(row.token_id ?? row.asset ?? ''),
+    conditionId: String(row.condition_id ?? row.conditionId ?? ''),
+    size: Number(row.current_size ?? row.size ?? 0),
+    avgPrice: Number(row.avg_price ?? row.avgPrice ?? 0),
+    initialValue: Number(row.entry_cost_usdc ?? row.initialValue ?? 0),
+    currentValue: Number(row.current_value ?? row.currentValue ?? 0),
+    cashPnl: Number(row.unrealized_pnl ?? row.cashPnl ?? 0),
+    percentPnl: Number(row.percent_pnl ?? row.percentPnl ?? 0),
+    realizedPnl: Number(row.realized_pnl ?? row.realizedPnl ?? 0),
+    curPrice: Number(row.current_price ?? row.curPrice ?? 0),
+    title: String(row.title ?? ''),
+    outcome: String(row.outcome ?? ''),
+  }));
 }
 
 async function fetchTrades(address: string): Promise<Trade[]> {
   const allTrades: Trade[] = [];
-  let offset = 0;
-  const limit = 500;
+  let cursor: string | null = null;
+  const limit = 200;
 
-  while (true) {
-    const url = `https://data-api.polymarket.com/activity?user=${address}&type=TRADE&limit=${limit}&offset=${offset}`;
+  for (let page = 0; page < 10; page++) {
+    const params = new URLSearchParams({
+      user: address,
+      type: 'TRADE',
+      limit: String(limit),
+    });
+    if (cursor) params.set('cursor', cursor);
+
+    const url = `https://data-api.polymarket.com/v2/activity?${params.toString()}`;
     const response = await fetch(url);
-    const trades = await response.json();
+    const payload = await response.json();
+    const rows = unwrapData(payload);
 
-    if (!Array.isArray(trades) || trades.length === 0) break;
-    allTrades.push(...trades);
-    if (trades.length < limit) break;
-    offset += limit;
-    // No limit - fetch all trades
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      allTrades.push({
+        timestamp: Number(row.timestamp ?? 0),
+        side: String(row.side ?? ''),
+        usdcSize: Number(row.usdc_size ?? row.usdcSize ?? 0),
+        size: Number(row.size ?? 0),
+        price: Number(row.price ?? 0),
+        title: String(row.title ?? ''),
+        outcome: String(row.outcome ?? ''),
+        conditionId: String(row.condition_id ?? row.conditionId ?? ''),
+        asset: String(row.token_id ?? row.asset ?? ''),
+      });
+    }
+
+    const next =
+      payload && typeof payload === 'object'
+        ? (payload as { pagination?: { next_cursor?: string | null; has_more?: boolean } })
+            .pagination
+        : undefined;
+    if (!next?.has_more || !next.next_cursor) break;
+    cursor = next.next_cursor;
   }
 
   return allTrades;

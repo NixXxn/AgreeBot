@@ -2,7 +2,7 @@ import { ClobClient } from '@polymarket/clob-client';
 import { UserActivityInterface, UserPositionInterface } from '../interfaces/User';
 import { ENV } from '../config/env';
 import { getUserActivityModel } from '../models/userHistory';
-import fetchData from '../utils/fetchData';
+import { fetchUserPositions } from '../utils/polymarketData';
 import getMyBalance from '../utils/getMyBalance';
 import postOrder from '../utils/postOrder';
 import Logger from '../utils/logger';
@@ -164,21 +164,19 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             transactionHash: trade.transactionHash,
         });
 
-        const user_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${trade.userAddress}`
-        );
+        const user_positions = (await fetchUserPositions(
+            trade.userAddress
+        )) as UserPositionInterface[];
         const user_position = user_positions.find(
-            (position: UserPositionInterface) => position.conditionId === trade.conditionId
+            (position) => position.conditionId === trade.conditionId
         );
 
         let my_position: UserPositionInterface | undefined;
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions: UserPositionInterface[] = await fetchData(
-                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-            );
+            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
             my_position = my_positions.find(
-                (position: UserPositionInterface) => position.conditionId === trade.conditionId
+                (position) => position.conditionId === trade.conditionId
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
@@ -232,21 +230,19 @@ const doConsensusTrading = async (
             await UserActivity.updateOne({ _id: trade._id }, { $set: { botExcutedTime: 1 } });
         }
 
-        const user_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${ready.referenceTrader}`
-        );
+        const user_positions = (await fetchUserPositions(
+            ready.referenceTrader
+        )) as UserPositionInterface[];
         const user_position = user_positions.find(
-            (position: UserPositionInterface) => position.conditionId === ready.trade.conditionId
+            (position) => position.conditionId === ready.trade.conditionId
         );
 
         let my_position: UserPositionInterface | undefined;
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions: UserPositionInterface[] = await fetchData(
-                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-            );
+            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
             my_position = my_positions.find(
-                (position: UserPositionInterface) => position.conditionId === ready.trade.conditionId
+                (position) => position.conditionId === ready.trade.conditionId
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
@@ -300,21 +296,19 @@ const doAggregatedTrading = async (
             await UserActivity.updateOne({ _id: trade._id }, { $set: { botExcutedTime: 1 } });
         }
 
-        const user_positions: UserPositionInterface[] = await fetchData(
-            `https://data-api.polymarket.com/positions?user=${agg.userAddress}`
-        );
+        const user_positions = (await fetchUserPositions(
+            agg.userAddress
+        )) as UserPositionInterface[];
         const user_position = user_positions.find(
-            (position: UserPositionInterface) => position.conditionId === agg.conditionId
+            (position) => position.conditionId === agg.conditionId
         );
 
         let my_position: UserPositionInterface | undefined;
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions: UserPositionInterface[] = await fetchData(
-                `https://data-api.polymarket.com/positions?user=${PROXY_WALLET}`
-            );
+            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
             my_position = my_positions.find(
-                (position: UserPositionInterface) => position.conditionId === agg.conditionId
+                (position) => position.conditionId === agg.conditionId
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
