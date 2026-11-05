@@ -333,11 +333,11 @@ async function fetchTrades(address: string): Promise<Trade[]> {
     if (rows.length === 0) break;
 
     for (const row of rows) {
+      const sideRaw = String(row.side ?? 'BUY').toUpperCase();
       allTrades.push({
         timestamp: Number(row.timestamp ?? 0),
-        side: String(row.side ?? ''),
+        side: sideRaw === 'SELL' ? 'SELL' : 'BUY',
         usdcSize: Number(row.usdc_size ?? row.usdcSize ?? 0),
-        size: Number(row.size ?? 0),
         price: Number(row.price ?? 0),
         title: String(row.title ?? ''),
         outcome: String(row.outcome ?? ''),
