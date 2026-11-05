@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 
+# Public dashboard port (Coolify). Bot health must NEVER share this port.
+WEB_PORT="${PORT:-3000}"
+BOT_HEALTH_PORT=3001
+
+# Coolify often sets HEALTH_PORT=$PORT — force the bot onto 3001
+export PORT="$WEB_PORT"
+export HEALTH_PORT="$BOT_HEALTH_PORT"
+
 # Sync Coolify / container env into /app/.env so the Next.js dashboard APIs can read them
 ENV_FILE="/app/.env"
 {
@@ -31,21 +39,26 @@ ENV_FILE="/app/.env"
   echo "TRADE_AGGREGATION_ENABLED=${TRADE_AGGREGATION_ENABLED:-false}"
   echo "TRADE_AGGREGATION_WINDOW_SECONDS=${TRADE_AGGREGATION_WINDOW_SECONDS:-300}"
   echo "AUTO_RESOLVE_ENABLED=${AUTO_RESOLVE_ENABLED:-false}"
-  echo "HEALTH_PORT=${HEALTH_PORT:-3001}"
+  echo "HEALTH_PORT=${BOT_HEALTH_PORT}"
 } > "$ENV_FILE"
 
-# Bot health stays on 3001; Next.js dashboard owns public port 3000
-export HEALTH_PORT="${HEALTH_PORT:-3001}"
-export PORT="${PORT:-3000}"
 export HOSTNAME="0.0.0.0"
 
-echo "Starting AgreeBot (health :${HEALTH_PORT}) + dashboard (:${PORT})..."
+echo "Starting AgreeBot (health :${BOT_HEALTH_PORT}) + dashboard (:${WEB_PORT})..."
 
 node /app/dist/index.js &
 BOT_PID=$!
 
+# Give the bot a moment; fail fast if it crashed (e.g. missing deps)
+sleep 2
+if ! kill -0 "$BOT_PID" 2>/dev/null; then
+  echo "Bot process failed to start"
+  wait "$BOT_PID" || true
+  exit 1
+fi
+
 cd /app/web
-npm run start -- -H 0.0.0.0 -p "$PORT" &
+npx next start -H 0.0.0.0 -p "$WEB_PORT" &
 WEB_PID=$!
 
 term() {
@@ -54,7 +67,6 @@ term() {
 }
 trap term TERM INT
 
-# Exit if either process dies
 while kill -0 "$BOT_PID" 2>/dev/null && kill -0 "$WEB_PID" 2>/dev/null; do
   sleep 2
 done
