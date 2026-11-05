@@ -18,6 +18,7 @@ export interface BotTradeRow {
   minAgreement: number | null;
   pnl: number | null;
   roi: number | null;
+  resolved?: boolean;
 }
 
 export interface TradesResponse {
@@ -28,6 +29,7 @@ export interface TradesResponse {
     skipped: number;
     totalPnl: number;
     paper: boolean;
+    resolved?: number;
   };
   error?: string;
   fetchedAt?: string;

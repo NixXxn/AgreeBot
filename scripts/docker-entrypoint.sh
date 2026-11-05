@@ -9,21 +9,48 @@ BOT_HEALTH_PORT=3001
 export PORT="$WEB_PORT"
 export HEALTH_PORT="$BOT_HEALTH_PORT"
 
+# Strip accidental wrapping quotes Coolify sometimes leaves on values
+strip_q() {
+  v="$1"
+  case "$v" in
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+  esac
+  # second peel for nested ''https...''
+  case "$v" in
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+  esac
+  printf '%s' "$v"
+}
+
+PAPER_MODE="$(strip_q "${PAPER_MODE:-false}")"
+PREVIEW_MODE="$(strip_q "${PREVIEW_MODE:-false}")"
+PAPER_BALANCE_USD="$(strip_q "${PAPER_BALANCE_USD:-10000}")"
+USER_ADDRESSES="$(strip_q "${USER_ADDRESSES:-}")"
+PROXY_WALLET="$(strip_q "${PROXY_WALLET:-}")"
+PRIVATE_KEY="$(strip_q "${PRIVATE_KEY:-}")"
+MONGO_URI="$(strip_q "${MONGO_URI:-}")"
+RPC_URL="$(strip_q "${RPC_URL:-}")"
+CLOB_HTTP_URL="$(strip_q "${CLOB_HTTP_URL:-https://clob.polymarket.com/}")"
+CLOB_WS_URL="$(strip_q "${CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}")"
+USDC_CONTRACT_ADDRESS="$(strip_q "${USDC_CONTRACT_ADDRESS:-0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174}")"
+
 # Sync Coolify / container env into /app/.env so the Next.js dashboard APIs can read them
 ENV_FILE="/app/.env"
 {
   echo "# Generated at container start — do not edit by hand"
-  echo "PAPER_MODE=${PAPER_MODE:-false}"
-  echo "PREVIEW_MODE=${PREVIEW_MODE:-false}"
-  echo "PAPER_BALANCE_USD=${PAPER_BALANCE_USD:-10000}"
-  echo "USER_ADDRESSES=${USER_ADDRESSES:-}"
-  echo "PROXY_WALLET=${PROXY_WALLET:-}"
-  echo "PRIVATE_KEY=${PRIVATE_KEY:-}"
-  echo "MONGO_URI=${MONGO_URI:-}"
-  echo "RPC_URL=${RPC_URL:-}"
-  echo "CLOB_HTTP_URL=${CLOB_HTTP_URL:-https://clob.polymarket.com/}"
-  echo "CLOB_WS_URL=${CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}"
-  echo "USDC_CONTRACT_ADDRESS=${USDC_CONTRACT_ADDRESS:-0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174}"
+  echo "PAPER_MODE=${PAPER_MODE}"
+  echo "PREVIEW_MODE=${PREVIEW_MODE}"
+  echo "PAPER_BALANCE_USD=${PAPER_BALANCE_USD}"
+  echo "USER_ADDRESSES=${USER_ADDRESSES}"
+  echo "PROXY_WALLET=${PROXY_WALLET}"
+  echo "PRIVATE_KEY=${PRIVATE_KEY}"
+  echo "MONGO_URI=${MONGO_URI}"
+  echo "RPC_URL=${RPC_URL}"
+  echo "CLOB_HTTP_URL=${CLOB_HTTP_URL}"
+  echo "CLOB_WS_URL=${CLOB_WS_URL}"
+  echo "USDC_CONTRACT_ADDRESS=${USDC_CONTRACT_ADDRESS}"
   echo "COPY_STRATEGY=${COPY_STRATEGY:-KELLY}"
   echo "COPY_SIZE=${COPY_SIZE:-10.0}"
   echo "TRADE_MULTIPLIER=${TRADE_MULTIPLIER:-1.0}"

@@ -199,10 +199,12 @@ export function TradesTable() {
                     )}
                   </TableCell>
                   <TableCell className="text-center">
-                    {trade.entered ? (
-                      <Badge variant="success">{trade.paper ? 'Paper' : 'Yes'}</Badge>
-                    ) : (
+                    {!trade.entered ? (
                       <Badge variant="warning">No</Badge>
+                    ) : trade.resolved ? (
+                      <Badge variant="info">{trade.paper ? 'Paper · Resolved' : 'Resolved'}</Badge>
+                    ) : (
+                      <Badge variant="success">{trade.paper ? 'Paper' : 'Yes'}</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right font-mono">
@@ -212,7 +214,13 @@ export function TradesTable() {
                     {trade.entryPrice > 0 ? trade.entryPrice.toFixed(3) : '—'}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {trade.currentPrice != null ? trade.currentPrice.toFixed(3) : '—'}
+                    {trade.currentPrice != null
+                      ? trade.resolved
+                        ? trade.currentPrice >= 0.5
+                          ? '1.000 ✓'
+                          : '0.000 ✗'
+                        : trade.currentPrice.toFixed(3)
+                      : '—'}
                   </TableCell>
                   <TableCell
                     className={`text-right font-mono ${

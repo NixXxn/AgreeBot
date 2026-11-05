@@ -1,48 +1,18 @@
 import { NextResponse } from 'next/server';
 import { HealthCheckResult } from '@/types/settings';
-import * as fs from 'fs';
-import * as path from 'path';
 import { getRuntimeOverrides } from '@/lib/runtimeSettings';
-
-const ENV_PATH = path.join(process.cwd(), '..', '.env');
-
-function readEnvFileValue(key: string): string | undefined {
-  try {
-    if (!fs.existsSync(ENV_PATH)) return undefined;
-    const content = fs.readFileSync(ENV_PATH, 'utf-8');
-    const lines = content.split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const equalIndex = trimmed.indexOf('=');
-      if (equalIndex === -1) continue;
-
-      const lineKey = trimmed.slice(0, equalIndex).trim();
-      if (lineKey === key) {
-        let value = trimmed.slice(equalIndex + 1).trim();
-        if (
-          (value.startsWith("'") && value.endsWith("'")) ||
-          (value.startsWith('"') && value.endsWith('"'))
-        ) {
-          value = value.slice(1, -1);
-        }
-        return value;
-      }
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
+import { joinUrl, readEnvFileValue, stripQuotes } from '@/lib/env';
 
 export async function GET() {
   const overrides = await getRuntimeOverrides();
   const getEnvValue = (key: string): string | undefined => {
-    if (overrides[key] !== undefined && overrides[key] !== '') return overrides[key];
-    if (process.env[key]) return process.env[key];
-    return readEnvFileValue(key);
+    const raw =
+      (overrides[key] !== undefined && overrides[key] !== ''
+        ? overrides[key]
+        : undefined) ??
+      process.env[key] ??
+      readEnvFileValue(key);
+    return raw !== undefined ? stripQuotes(raw) : undefined;
   };
 
   const result: HealthCheckResult = {
@@ -112,7 +82,8 @@ export async function GET() {
 
   try {
     const clobUrl = getEnvValue('CLOB_HTTP_URL') || 'https://clob.polymarket.com/';
-    const response = await fetch(`${clobUrl}time`, { method: 'GET' });
+    const timeUrl = joinUrl(clobUrl, 'time');
+    const response = await fetch(timeUrl, { method: 'GET' });
 
     if (!response.ok) {
       result.checks.api = {

@@ -2,18 +2,127 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongo';
 import type { BotTradeRow } from '@/types/trades';
 
-async function fetchMidpoint(tokenId: string): Promise<number | null> {
-  if (!tokenId) return null;
+interface PriceInfo {
+  price: number | null;
+  resolved: boolean;
+}
+
+async function fetchClobMidpoint(tokenId: string): Promise<number | null> {
   try {
     const url = `https://clob.polymarket.com/midpoint?token_id=${encodeURIComponent(tokenId)}`;
-    const res = await fetch(url, { next: { revalidate: 30 } });
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return null;
     const data = await res.json();
     const mid = Number(data?.mid ?? data?.price ?? NaN);
-    return Number.isFinite(mid) ? mid : null;
+    return Number.isFinite(mid) && mid >= 0 ? mid : null;
   } catch {
     return null;
   }
+}
+
+async function fetchClobLastPrice(tokenId: string): Promise<number | null> {
+  try {
+    const url = `https://clob.polymarket.com/last-trade-price?token_id=${encodeURIComponent(tokenId)}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const price = Number(data?.price ?? data?.last_trade_price ?? NaN);
+    return Number.isFinite(price) && price >= 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gamma market resolution — for closed short-window markets midpoint is often gone.
+ * Returns price of our specific token (0 or 1 when resolved).
+ */
+async function fetchGammaTokenPrice(
+  conditionId: string,
+  tokenId: string,
+  outcome?: string
+): Promise<PriceInfo | null> {
+  if (!conditionId && !tokenId) return null;
+  try {
+    const params = new URLSearchParams();
+    if (conditionId) params.set('condition_ids', conditionId);
+    const url = `https://gamma-api.polymarket.com/markets?${params.toString()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const markets = await res.json();
+    if (!Array.isArray(markets) || markets.length === 0) return null;
+
+    const market =
+      markets.find((m: Record<string, unknown>) => {
+        const tokens = parseJsonArray(m.clobTokenIds ?? m.clob_token_ids);
+        return tokens.includes(tokenId);
+      }) || markets[0];
+
+    const tokens = parseJsonArray(market.clobTokenIds ?? market.clob_token_ids);
+    const outcomes = parseJsonArray(market.outcomes);
+    const prices = parseJsonArray(market.outcomePrices ?? market.outcome_prices).map(
+      (p) => Number(p)
+    );
+    const closed = Boolean(market.closed || market.resolved || market.active === false);
+
+    let idx = tokens.indexOf(tokenId);
+    if (idx < 0 && outcome) {
+      idx = outcomes.findIndex(
+        (o) => o.toLowerCase() === outcome.toLowerCase()
+      );
+    }
+    if (idx < 0 || !Number.isFinite(prices[idx])) {
+      return closed ? { price: null, resolved: true } : null;
+    }
+
+    const price = prices[idx];
+    // Treat near-0/1 as resolved even if closed flag lags
+    const snapped =
+      price >= 0.99 ? 1 : price <= 0.01 ? 0 : price;
+    const resolved = closed || snapped === 0 || snapped === 1;
+    return { price: snapped, resolved };
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      return raw.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+async function resolveTokenPrice(
+  tokenId: string,
+  conditionId: string,
+  outcome?: string
+): Promise<PriceInfo> {
+  const mid = await fetchClobMidpoint(tokenId);
+  if (mid != null) {
+    // Live mid near extremes often means resolved/settling
+    if (mid >= 0.99) return { price: 1, resolved: true };
+    if (mid <= 0.01) return { price: 0, resolved: true };
+    return { price: mid, resolved: false };
+  }
+
+  const last = await fetchClobLastPrice(tokenId);
+  if (last != null) {
+    if (last >= 0.99) return { price: 1, resolved: true };
+    if (last <= 0.01) return { price: 0, resolved: true };
+  }
+
+  const gamma = await fetchGammaTokenPrice(conditionId, tokenId, outcome);
+  if (gamma) return gamma;
+
+  if (last != null) return { price: last, resolved: false };
+  return { price: null, resolved: false };
 }
 
 function computePnL(
@@ -23,7 +132,7 @@ function computePnL(
   sizeUsd: number,
   entered: boolean
 ): { pnl: number | null; roi: number | null } {
-  if (!entered || !currentPrice || entryPrice <= 0 || sizeUsd <= 0) {
+  if (!entered || currentPrice == null || entryPrice <= 0 || sizeUsd <= 0) {
     return { pnl: null, roi: null };
   }
   const shares = sizeUsd / entryPrice;
@@ -53,19 +162,25 @@ export async function GET() {
       .limit(200)
       .toArray();
 
-    // Fetch midpoints for unique assets (entered trades only, capped)
-    const assetsNeedingPrice = Array.from(
-      new Set(
-        docs
-          .filter((d) => d.entered && d.asset)
-          .map((d) => String(d.asset))
-      )
-    ).slice(0, 40);
+    const enteredDocs = docs.filter((d) => d.entered && d.asset);
+    // Dedupe by asset for price fetches
+    const uniqueAssets = Array.from(
+      new Map(
+        enteredDocs.map((d) => [
+          String(d.asset),
+          {
+            asset: String(d.asset),
+            conditionId: String(d.conditionId || ''),
+            outcome: String(d.outcome || ''),
+          },
+        ])
+      ).values()
+    ).slice(0, 50);
 
-    const priceMap = new Map<string, number | null>();
+    const priceMap = new Map<string, PriceInfo>();
     await Promise.all(
-      assetsNeedingPrice.map(async (asset) => {
-        priceMap.set(asset, await fetchMidpoint(asset));
+      uniqueAssets.map(async ({ asset, conditionId, outcome }) => {
+        priceMap.set(asset, await resolveTokenPrice(asset, conditionId, outcome));
       })
     );
 
@@ -76,8 +191,10 @@ export async function GET() {
       const entryPrice = Number(d.entryPrice || 0);
       const sizeUsd = Number(d.sizeUsd || 0);
       const entered = Boolean(d.entered);
-      const currentPrice = entered ? priceMap.get(String(d.asset)) ?? null : null;
-      const { pnl, roi } = computePnL(side, entryPrice, currentPrice ?? null, sizeUsd, entered);
+      const info = entered ? priceMap.get(String(d.asset)) : undefined;
+      const currentPrice = info?.price ?? null;
+      const resolved = Boolean(info?.resolved);
+      const { pnl, roi } = computePnL(side, entryPrice, currentPrice, sizeUsd, entered);
 
       return {
         id: String(d._id),
@@ -104,6 +221,7 @@ export async function GET() {
             : null,
         pnl,
         roi,
+        resolved,
       };
     });
 
@@ -118,6 +236,7 @@ export async function GET() {
         skipped: trades.length - entered.length,
         totalPnl,
         paper: trades.some((t) => t.paper),
+        resolved: entered.filter((t) => t.resolved).length,
       },
       fetchedAt: new Date().toISOString(),
     });
