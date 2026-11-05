@@ -90,7 +90,7 @@ export function BotSettingsSection({
             </div>
           </div>
 
-          {balance && (
+          {balance && typeof balance.usdc === 'number' && typeof balance.matic === 'number' && (
             <div className="grid grid-cols-2 gap-4">
               <div className="p-3 bg-muted/50 rounded-lg">
                 <p className="text-xs text-muted-foreground mb-1">USDC Balance</p>
@@ -234,7 +234,7 @@ export function BotSettingsSection({
               type="number"
               min={1000}
               step={1000}
-              value={network.requestTimeoutMs}
+              value={network?.requestTimeoutMs ?? 10000}
               onChange={(e) => onNetworkChange({ requestTimeoutMs: parseInt(e.target.value) || 10000 })}
             />
             <Input
@@ -242,7 +242,7 @@ export function BotSettingsSection({
               type="number"
               min={1}
               max={10}
-              value={network.networkRetryLimit}
+              value={network?.networkRetryLimit ?? 3}
               onChange={(e) => onNetworkChange({ networkRetryLimit: parseInt(e.target.value) || 3 })}
             />
           </div>

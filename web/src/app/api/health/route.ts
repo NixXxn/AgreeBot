@@ -67,12 +67,19 @@ export async function GET() {
     result.healthy = false;
   }
 
+  const paperMode =
+    getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
+
   // Check RPC endpoint
   try {
     const rpcUrl = getEnvValue('RPC_URL');
     if (!rpcUrl) {
-      result.checks.rpc = { status: 'error', message: 'RPC_URL not configured' };
-      result.healthy = false;
+      if (paperMode) {
+        result.checks.rpc = { status: 'ok', message: 'Skipped (paper mode)' };
+      } else {
+        result.checks.rpc = { status: 'error', message: 'RPC_URL not configured' };
+        result.healthy = false;
+      }
     } else {
       // Try to call eth_blockNumber
       const response = await fetch(rpcUrl, {

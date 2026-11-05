@@ -2,6 +2,7 @@ import { UserActivityInterface } from '../interfaces/User';
 import { ENV } from '../config/env';
 import { getUserActivityModel } from '../models/userHistory';
 import Logger from '../utils/logger';
+import { recordBotSignal } from './botSignals';
 
 export interface TradeWithUser extends UserActivityInterface {
     userAddress: string;
@@ -239,6 +240,34 @@ export const evaluateConsensusBuffer = async (): Promise<{
                     `${group.side} ${group.outcome || group.slug || 'market'} — skipping`
             );
             await markTradesProcessed(group.trades, { bot: true, botExcutedTime: 999 });
+
+            const ref = group.trades[0];
+            const avgPrice =
+                group.trades.reduce((s, t) => s + t.price * t.usdcSize, 0) /
+                    Math.max(
+                        group.trades.reduce((s, t) => s + t.usdcSize, 0),
+                        1e-9
+                    ) ||
+                ref?.price ||
+                0;
+
+            await recordBotSignal({
+                conditionId: group.conditionId,
+                asset: group.asset,
+                side: (group.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
+                title: ref?.title,
+                slug: group.slug || ref?.slug,
+                eventSlug: group.eventSlug || ref?.eventSlug,
+                outcome: group.outcome || ref?.outcome,
+                entryPrice: avgPrice,
+                sizeUsd: 0,
+                agreementCount: uniqueCount,
+                agreeingTraders: Array.from(group.traderAddresses),
+                entered: false,
+                reason: 'consensus_expired',
+                minAgreement,
+            });
+
             consensusBuffer.delete(key);
             expiredCount++;
         }

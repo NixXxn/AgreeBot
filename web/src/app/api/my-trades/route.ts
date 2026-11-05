@@ -58,22 +58,27 @@ async function fetchLiveData(reportsDir: string) {
   if (!fs.existsSync(summaryPath) && (paperMode || !proxyWallet)) {
     return NextResponse.json({
       analysisDate: new Date().toISOString(),
-      myWallet: proxyWallet || null,
+      myWallet: proxyWallet || 'paper-mode',
       paperMode: true,
-      summary: {
-        totalCopiedTrades: 0,
-        copyBuyCount: 0,
-        copySellCount: 0,
-        totalCopyVolume: 0,
-        matchedBuyVolume: 0,
-        matchedSellVolume: 0,
-        estimatedCopyPnL: 0,
-        positionsPnL: 0,
-      },
+      traders: [],
+      allMyTrades: [],
       byTrader: [],
-      trades: [],
+      positions: {
+        total: 0,
+        totalValue: 0,
+        unrealizedPnL: 0,
+        realizedPnL: 0,
+        totalPnL: 0,
+      },
+      summary: {
+        totalTrades: 0,
+        totalBought: 0,
+        totalSold: 0,
+        matchedTrades: 0,
+        unmatchedTrades: 0,
+      },
       message: paperMode
-        ? 'Paper mode — no live copy trades yet. Signals appear in bot logs as [PAPER] Would …'
+        ? 'Paper mode — no live copy trades yet. Consensus signals show in the Trades section on Traders.'
         : 'No PROXY_WALLET configured. Set a wallet or run npm run analyze for historical reports.',
     });
   }

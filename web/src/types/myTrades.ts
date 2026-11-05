@@ -45,4 +45,6 @@ export interface MyTradesResponse {
   };
   cached?: boolean;
   cacheDate?: string;
+  paperMode?: boolean;
+  message?: string;
 }

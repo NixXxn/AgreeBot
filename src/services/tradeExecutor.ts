@@ -14,6 +14,7 @@ import {
     shouldUseConsensus,
     getConsensusBufferSize,
 } from './consensus';
+import { recordBotSignal } from './botSignals';
 
 const USER_ADDRESSES = ENV.USER_ADDRESSES;
 const PROXY_WALLET = ENV.PROXY_WALLET;
@@ -191,7 +192,7 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
         }
 
         // Execute the trade (or paper-log)
-        await postOrder(
+        const orderResult = await postOrder(
             clobClient,
             trade.side === 'BUY' ? 'buy' : 'sell',
             my_position,
@@ -201,6 +202,23 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             user_balance,
             trade.userAddress
         );
+
+        await recordBotSignal({
+            conditionId: trade.conditionId,
+            asset: trade.asset,
+            side: (trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
+            title: trade.title,
+            slug: trade.slug,
+            eventSlug: trade.eventSlug,
+            outcome: trade.outcome,
+            entryPrice: trade.price,
+            sizeUsd: orderResult?.sizeUsd ?? trade.usdcSize,
+            agreementCount: 1,
+            agreeingTraders: [trade.userAddress],
+            entered: true,
+            reason: 'copy',
+            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+        });
 
         Logger.separator();
     }
@@ -255,7 +273,7 @@ const doConsensusTrading = async (
             Logger.balance(my_balance, user_balance, ready.referenceTrader);
         }
 
-        await postOrder(
+        const orderResult = await postOrder(
             clobClient,
             ready.trade.side === 'BUY' ? 'buy' : 'sell',
             my_position,
@@ -265,6 +283,24 @@ const doConsensusTrading = async (
             user_balance,
             ready.referenceTrader
         );
+
+        await recordBotSignal({
+            conditionId: ready.trade.conditionId,
+            asset: ready.trade.asset,
+            side: (ready.trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
+            title: ready.trade.title,
+            slug: ready.trade.slug,
+            eventSlug: ready.trade.eventSlug,
+            outcome: ready.trade.outcome,
+            entryPrice: ready.trade.price,
+            sizeUsd: orderResult?.sizeUsd ?? ready.trade.usdcSize,
+            agreementCount: ready.agreeingTraders.length,
+            agreeingTraders: ready.agreeingTraders,
+            entered: true,
+            reason: 'consensus',
+            minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
+            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+        });
 
         // Mark contributing trades fully processed
         for (const trade of ready.contributingTrades) {
@@ -331,7 +367,7 @@ const doAggregatedTrading = async (
         };
 
         // Execute the aggregated trade (or paper-log)
-        await postOrder(
+        const orderResult = await postOrder(
             clobClient,
             agg.side === 'BUY' ? 'buy' : 'sell',
             my_position,
@@ -341,6 +377,23 @@ const doAggregatedTrading = async (
             user_balance,
             agg.userAddress
         );
+
+        await recordBotSignal({
+            conditionId: agg.conditionId,
+            asset: agg.asset,
+            side: (agg.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
+            title: agg.trades[0]?.title,
+            slug: agg.slug,
+            eventSlug: agg.eventSlug,
+            outcome: agg.trades[0]?.outcome,
+            entryPrice: agg.averagePrice,
+            sizeUsd: orderResult?.sizeUsd ?? agg.totalUsdcSize,
+            agreementCount: 1,
+            agreeingTraders: [agg.userAddress],
+            entered: true,
+            reason: 'aggregated',
+            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+        });
 
         Logger.separator();
     }

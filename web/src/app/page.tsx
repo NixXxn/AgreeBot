@@ -14,6 +14,7 @@ import { TrendArrow } from '@/components/charts/TrendArrow';
 import { RiskScoreMeter } from '@/components/charts/RiskScoreMeter';
 import { ActivePositionsPie } from '@/components/charts/ActivePositionsPie';
 import { TradersTable } from '@/components/TradersTable';
+import { TradesTable } from '@/components/TradesTable';
 import { MyTradesView } from '@/components/MyTradesView';
 import { SettingsView } from '@/components/SettingsView';
 import { StatusBar } from '@/components/StatusBar';
@@ -204,7 +205,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Table */}
+            {/* Bot trades (consensus / paper / live) */}
+            <TradesTable />
+
+            {/* Traders overview */}
             <TradersTable traders={traders} />
           </>
         )}

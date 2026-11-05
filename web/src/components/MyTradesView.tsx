@@ -53,6 +53,10 @@ export function MyTradesView() {
   const filteredData = useMemo(() => {
     if (!data) return null;
 
+    const allMyTrades = Array.isArray(data.allMyTrades) ? data.allMyTrades : [];
+    const traders = Array.isArray(data.traders) ? data.traders : [];
+    const myWallet = data.myWallet || 'paper-mode';
+
     let startTimestamp: number;
     let endTimestamp = Date.now() / 1000;
 
@@ -78,14 +82,14 @@ export function MyTradesView() {
       }
     }
 
-    const filteredTrades = data.allMyTrades.filter(
+    const filteredTrades = allMyTrades.filter(
       (t) => t.timestamp >= startTimestamp && t.timestamp <= endTimestamp
     );
 
     // Recalculate byTrader stats for filtered trades
     const byTraderMap = new Map<string, CopyTrade[]>();
     byTraderMap.set('unmatched', []);
-    for (const trader of data.traders) {
+    for (const trader of traders) {
       byTraderMap.set(trader.address.toLowerCase(), []);
     }
 
@@ -102,7 +106,7 @@ export function MyTradesView() {
       }
     }
 
-    const byTrader: TraderCopyStats[] = data.traders.map((trader) => {
+    const byTrader: TraderCopyStats[] = traders.map((trader) => {
       const trades = byTraderMap.get(trader.address.toLowerCase()) || [];
       let totalBought = 0;
       let totalSold = 0;
@@ -151,6 +155,8 @@ export function MyTradesView() {
 
     return {
       ...data,
+      myWallet,
+      traders,
       allMyTrades: filteredTrades,
       byTrader,
       summary: {
@@ -263,7 +269,9 @@ export function MyTradesView() {
         <div className="bg-card rounded-lg p-4 border">
           <p className="text-sm text-muted-foreground">My Wallet</p>
           <p className="text-sm font-mono truncate" title={filteredData.myWallet}>
-            {filteredData.myWallet.slice(0, 8)}...{filteredData.myWallet.slice(-6)}
+            {!filteredData.myWallet || filteredData.myWallet === 'paper-mode'
+              ? 'Paper mode (no wallet)'
+              : `${filteredData.myWallet.slice(0, 8)}...${filteredData.myWallet.slice(-6)}`}
           </p>
         </div>
         <div className="bg-card rounded-lg p-4 border">

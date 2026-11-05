@@ -64,10 +64,22 @@ export function SettingsView() {
   const fetchBalance = useCallback(async () => {
     try {
       const response = await fetch('/api/balance');
-      const data: BalanceInfo = await response.json();
-      setBalance(data);
+      if (!response.ok) {
+        setBalance(null);
+        return;
+      }
+      const data = await response.json();
+      if (
+        typeof data?.usdc === 'number' &&
+        typeof data?.matic === 'number'
+      ) {
+        setBalance(data as BalanceInfo);
+      } else {
+        setBalance(null);
+      }
     } catch (err) {
       console.error('Failed to fetch balance:', err);
+      setBalance(null);
     }
   }, []);
 

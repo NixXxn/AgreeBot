@@ -63,6 +63,12 @@ const isInsufficientBalanceOrAllowanceError = (message: string | undefined): boo
     return lower.includes('not enough balance') || lower.includes('allowance');
 };
 
+export interface PostOrderResult {
+    executed: boolean;
+    sizeUsd: number;
+    paper: boolean;
+}
+
 const postOrder = async (
     clobClient: ClobClient | null,
     condition: string,
@@ -72,7 +78,7 @@ const postOrder = async (
     my_balance: number,
     user_balance: number,
     userAddress: string
-) => {
+): Promise<PostOrderResult | undefined> => {
     const UserActivity = getUserActivityModel(userAddress);
 
     // Paper / preview mode: log the signal and mark processed — never place orders
@@ -95,7 +101,7 @@ const postOrder = async (
                 `(from ${userAddress.slice(0, 6)}…${userAddress.slice(-4)}) — ${orderSize.reasoning}`
         );
         await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
-        return;
+        return { executed: true, sizeUsd: orderSize.finalAmount, paper: true };
     }
 
     //Merge strategy
