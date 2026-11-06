@@ -20,8 +20,23 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
     return /^0x[a-fA-F0-9]{40}$/.test(address);
   };
 
+  const stripQuotes = (value: string): string => {
+    let v = value.trim();
+    for (let i = 0; i < 3; i++) {
+      if (
+        (v.startsWith("'") && v.endsWith("'")) ||
+        (v.startsWith('"') && v.endsWith('"'))
+      ) {
+        v = v.slice(1, -1).trim();
+        continue;
+      }
+      break;
+    }
+    return v;
+  };
+
   const handleAdd = () => {
-    const address = newTrader.trim().toLowerCase();
+    const address = stripQuotes(newTrader).toLowerCase();
 
     if (!address) {
       setError('Enter an address');
@@ -29,7 +44,7 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
     }
 
     if (!isValidAddress(address)) {
-      setError('Invalid Ethereum address format');
+      setError('Invalid Ethereum address format (0x + 40 hex chars)');
       return;
     }
 

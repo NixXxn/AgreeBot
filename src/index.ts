@@ -9,7 +9,6 @@ import Logger from './utils/logger';
 import { performHealthCheck, logHealthCheck } from './utils/healthCheck';
 import { ClobClient } from '@polymarket/clob-client';
 
-const USER_ADDRESSES = ENV.USER_ADDRESSES;
 const PROXY_WALLET = ENV.PROXY_WALLET;
 
 // Graceful shutdown handler
@@ -74,7 +73,8 @@ export const main = async () => {
         const { applyRuntimeOverrides } = await import('./services/runtimeSettings');
         await applyRuntimeOverrides();
 
-        Logger.startup(USER_ADDRESSES, PROXY_WALLET);
+        // USER_ADDRESSES const aliases the same array mutated by applyRuntimeOverrides
+        Logger.startup(ENV.USER_ADDRESSES, PROXY_WALLET);
 
         if (ENV.PAPER_MODE) {
             Logger.warning(
@@ -84,7 +84,7 @@ export const main = async () => {
 
         if (ENV.CONSENSUS_ENABLED) {
             Logger.info(
-                `Consensus trading enabled: ${ENV.CONSENSUS_MIN_AGREEMENT}+ of ${USER_ADDRESSES.length} traders must agree`
+                `Consensus trading enabled: ${ENV.CONSENSUS_MIN_AGREEMENT}+ of ${ENV.USER_ADDRESSES.length} traders must agree`
             );
         }
 

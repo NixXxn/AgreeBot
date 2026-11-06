@@ -6,8 +6,23 @@ const isValidEthereumAddress = (address: string): boolean => {
     return /^0x[a-fA-F0-9]{40}$/.test(address);
 };
 
+const stripQuotes = (value: string): string => {
+    let v = value.trim();
+    for (let i = 0; i < 3; i++) {
+        if (
+            (v.startsWith("'") && v.endsWith("'")) ||
+            (v.startsWith('"') && v.endsWith('"'))
+        ) {
+            v = v.slice(1, -1).trim();
+            continue;
+        }
+        break;
+    }
+    return v;
+};
+
 const parseUserAddresses = (input: string): string[] => {
-    const trimmed = input.trim();
+    const trimmed = stripQuotes(input);
     if (!trimmed) return [];
 
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
@@ -15,7 +30,7 @@ const parseUserAddresses = (input: string): string[] => {
             const parsed = JSON.parse(trimmed);
             if (Array.isArray(parsed)) {
                 return parsed
-                    .map((addr: string) => String(addr).toLowerCase().trim())
+                    .map((addr: string) => stripQuotes(String(addr)).toLowerCase())
                     .filter((addr) => addr.length > 0 && isValidEthereumAddress(addr));
             }
         } catch {
@@ -25,7 +40,7 @@ const parseUserAddresses = (input: string): string[] => {
 
     return trimmed
         .split(',')
-        .map((addr) => addr.toLowerCase().trim().replace(/^['"]|['"]$/g, ''))
+        .map((addr) => stripQuotes(addr).toLowerCase())
         .filter((addr) => addr.length > 0 && isValidEthereumAddress(addr));
 };
 
@@ -57,15 +72,14 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
         return;
     }
 
-    if (overrides.USER_ADDRESSES) {
-        const addresses = parseUserAddresses(overrides.USER_ADDRESSES);
-        if (addresses.length > 0) {
-            ENV.USER_ADDRESSES.length = 0;
-            ENV.USER_ADDRESSES.push(...addresses);
-            Logger.success(
-                `Loaded ${addresses.length} trader(s) from dashboard overrides (Mongo)`
-            );
-        }
+    // Explicit key means dashboard owns the list (including empty clear)
+    if (Object.prototype.hasOwnProperty.call(overrides, 'USER_ADDRESSES')) {
+        const addresses = parseUserAddresses(overrides.USER_ADDRESSES || '');
+        ENV.USER_ADDRESSES.length = 0;
+        ENV.USER_ADDRESSES.push(...addresses);
+        Logger.success(
+            `Loaded ${addresses.length} trader(s) from dashboard overrides (Mongo)`
+        );
     }
 
     if (overrides.CONSENSUS_ENABLED !== undefined) {

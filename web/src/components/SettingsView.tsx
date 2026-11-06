@@ -31,7 +31,7 @@ export function SettingsView() {
   const fetchSettings = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/settings');
+      const response = await fetch('/api/settings', { cache: 'no-store' });
       const data: SettingsResponse = await response.json();
 
       if (!response.ok) {
@@ -111,22 +111,64 @@ export function SettingsView() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(update),
+        cache: 'no-store',
       });
 
-      const data = await response.json();
+      let data: {
+        settings?: BotSettings;
+        traderLabels?: Record<string, string>;
+        error?: string;
+        message?: string;
+      };
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          response.ok
+            ? 'Save succeeded but returned invalid JSON'
+            : `Failed to save settings (HTTP ${response.status})`
+        );
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to save settings');
       }
 
-      setSettings(data.settings);
+      if (!data.settings?.traders) {
+        throw new Error('Save response missing traders — settings may not have persisted');
+      }
+
+      // Confirm round-trip: reload from GET (Mongo merge) so UI matches disk
+      const verify = await fetch('/api/settings', { cache: 'no-store' });
+      const verified: SettingsResponse = await verify.json();
+      if (!verify.ok) {
+        throw new Error(
+          (verified as unknown as { error?: string }).error ||
+            'Saved, but failed to re-read settings from server'
+        );
+      }
+
+      const expected = [...settings.traders].map((a) => a.toLowerCase()).sort();
+      const actual = [...verified.settings.traders].map((a) => a.toLowerCase()).sort();
+      if (
+        expected.length !== actual.length ||
+        expected.some((addr, i) => addr !== actual[i])
+      ) {
+        throw new Error(
+          `Save did not persist traders (sent ${expected.length}, got ${actual.length} after reload). Check MongoDB / MONGO_URI.`
+        );
+      }
+
+      setSettings(verified.settings);
+      setTraderLabels(verified.traderLabels || {});
       setHasChanges(false);
       setSuccessMessage(
-        'Settings saved to MongoDB. Restart the bot container so the trading process reloads them.'
+        data.message ||
+          `Saved ${verified.settings.traders.length} trader(s) to MongoDB. Restart the bot container to reload them.`
       );
 
-      // Clear success message after 5 seconds
-      setTimeout(() => setSuccessMessage(null), 5000);
+      // Clear success message after 8 seconds
+      setTimeout(() => setSuccessMessage(null), 8000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {

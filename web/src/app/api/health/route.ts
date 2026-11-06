@@ -4,7 +4,12 @@ import { getRuntimeOverrides } from '@/lib/runtimeSettings';
 import { joinUrl, readEnvFileValue, stripQuotes } from '@/lib/env';
 
 export async function GET() {
-  const overrides = await getRuntimeOverrides();
+  let overrides: Record<string, string> = {};
+  try {
+    overrides = await getRuntimeOverrides();
+  } catch (error) {
+    console.warn('Health: could not load runtime overrides', error);
+  }
   const getEnvValue = (key: string): string | undefined => {
     const raw =
       (overrides[key] !== undefined && overrides[key] !== ''

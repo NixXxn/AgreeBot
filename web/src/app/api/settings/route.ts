@@ -2,7 +2,16 @@ import { NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BotSettings, SettingsResponse, SettingsUpdate } from '@/types/settings';
-import { getRuntimeOverrides, saveRuntimeOverrides } from '@/lib/runtimeSettings';
+import {
+  getMergedEnv,
+  getRuntimeOverrides,
+  normalizeTraderAddresses,
+  saveRuntimeOverrides,
+} from '@/lib/runtimeSettings';
+import { stripQuotes } from '@/lib/env';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const ENV_PATH = path.join(process.cwd(), '..', '.env');
 const REPORTS_DIR = path.join(process.cwd(), '..', 'trader_reports');
@@ -23,11 +32,7 @@ function parseEnvFile(content: string): Record<string, string> {
     const key = trimmed.slice(0, equalIndex).trim();
     let value = trimmed.slice(equalIndex + 1).trim();
 
-    // Remove surrounding quotes if present
-    if ((value.startsWith("'") && value.endsWith("'")) ||
-        (value.startsWith('"') && value.endsWith('"'))) {
-      value = value.slice(1, -1);
-    }
+    value = stripQuotes(value);
 
     // Handle inline comments
     const commentIndex = value.indexOf(' #');
@@ -41,29 +46,19 @@ function parseEnvFile(content: string): Record<string, string> {
   return result;
 }
 
-// Remove surrounding quotes from a string
-function removeQuotes(s: string): string {
-  const trimmed = s.trim();
-  if ((trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-      (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
 // Convert env values to BotSettings
 function envToSettings(env: Record<string, string>): BotSettings {
   // Parse USER_ADDRESSES (can be comma-separated or JSON array)
   let traders: string[] = [];
-  const userAddresses = removeQuotes(env.USER_ADDRESSES || '');
+  const userAddresses = stripQuotes(env.USER_ADDRESSES || '');
   if (userAddresses.trim().startsWith('[')) {
     try {
-      traders = JSON.parse(userAddresses);
+      traders = normalizeTraderAddresses(JSON.parse(userAddresses) as string[]);
     } catch {
-      traders = userAddresses.split(',').map(s => removeQuotes(s)).filter(Boolean);
+      traders = normalizeTraderAddresses(userAddresses.split(','));
     }
-  } else {
-    traders = userAddresses.split(',').map(s => removeQuotes(s)).filter(Boolean);
+  } else if (userAddresses.trim()) {
+    traders = normalizeTraderAddresses(userAddresses.split(','));
   }
 
   return {
@@ -110,8 +105,8 @@ function envToSettings(env: Record<string, string>): BotSettings {
       networkRetryLimit: parseInt(env.NETWORK_RETRY_LIMIT || '3', 10),
     },
     wallet: {
-      proxyWallet: env.PROXY_WALLET || '',
-      usdcContract: env.USDC_CONTRACT_ADDRESS || '',
+      proxyWallet: stripQuotes(env.PROXY_WALLET || ''),
+      usdcContract: stripQuotes(env.USDC_CONTRACT_ADDRESS || ''),
     },
   };
 }
@@ -193,7 +188,9 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
   const envUpdates: Record<string, string | null> = {};
 
   if (update.traders !== undefined) {
-    envUpdates.USER_ADDRESSES = update.traders.join(',');
+    // Always persist (including empty) so Coolify's USER_ADDRESSES cannot resurrect
+    const normalized = normalizeTraderAddresses(update.traders);
+    envUpdates.USER_ADDRESSES = normalized.join(',');
   }
 
   if (update.copyStrategy) {
@@ -342,7 +339,7 @@ function envFromProcess(): Record<string, string> {
   for (const key of keys) {
     const value = process.env[key];
     if (value !== undefined && value !== '') {
-      env[key] = value;
+      env[key] = stripQuotes(value);
     }
   }
   return env;
@@ -359,9 +356,12 @@ async function buildEnvView(): Promise<Record<string, string>> {
   // Coolify injects vars into process.env
   env = { ...env, ...envFromProcess() };
 
-  // Dashboard saves win over Coolify (survive container restarts)
-  const overrides = await getRuntimeOverrides();
-  env = { ...env, ...overrides };
+  // Dashboard saves win over Coolify (survive container restarts).
+  // Require Mongo when MONGO_URI is set so we never silently show Coolify's list.
+  const mongoConfigured = Boolean(
+    process.env.MONGO_URI || env.MONGO_URI
+  );
+  env = await getMergedEnv(env, { required: mongoConfigured });
 
   return env;
 }
@@ -389,7 +389,10 @@ export async function GET() {
   } catch (error) {
     console.error('Error reading settings:', error);
     return NextResponse.json(
-      { error: 'Failed to read settings' },
+      {
+        error:
+          error instanceof Error ? error.message : 'Failed to read settings',
+      },
       { status: 500 }
     );
   }
@@ -398,6 +401,25 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const update: SettingsUpdate = await request.json();
+
+    if (update.traders !== undefined) {
+      const normalized = normalizeTraderAddresses(update.traders);
+      const invalid = update.traders.length - normalized.length;
+      if (update.traders.length > 0 && normalized.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              'No valid Ethereum addresses in traders list (strip quotes and use 0x…40 hex chars)',
+          },
+          { status: 400 }
+        );
+      }
+      update.traders = normalized;
+      if (invalid > 0) {
+        console.warn(`Dropped ${invalid} invalid trader address(es) on save`);
+      }
+    }
+
     const envUpdates = settingsToEnvUpdates(update);
 
     // Persist to Mongo so Coolify env + entrypoint rewrite cannot wipe traders
@@ -431,17 +453,41 @@ export async function PUT(request: Request) {
     const settings = envToSettings(env);
     const traderLabels = getTraderLabels();
 
+    // Confirm traders survived the Coolify→Mongo merge
+    if (update.traders !== undefined) {
+      const saved = settings.traders;
+      const expected = update.traders;
+      if (
+        saved.length !== expected.length ||
+        expected.some((addr, i) => saved[i] !== addr)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Settings saved to Mongo but GET merge returned a different trader list — check MONGO_URI database name',
+            settings,
+            traderLabels,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json({
       success: true,
       settings,
       traderLabels,
+      overrides: await getRuntimeOverrides().catch(() => ({})),
       message:
-        'Settings saved. Restart the bot container so the trading process reloads the new trader list.',
+        'Settings saved to MongoDB. Restart the bot container so the trading process reloads the new trader list.',
     });
   } catch (error) {
     console.error('Error updating settings:', error);
     return NextResponse.json(
-      { error: 'Failed to update settings' },
+      {
+        error:
+          error instanceof Error ? error.message : 'Failed to update settings',
+      },
       { status: 500 }
     );
   }

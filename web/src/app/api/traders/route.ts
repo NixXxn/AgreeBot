@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  getConfiguredTraderAddresses,
+  normalizeTraderAddresses,
+} from '@/lib/runtimeSettings';
+import { getUserAddressesFromEnv } from '@/lib/mongo';
+import { stripQuotes } from '@/lib/env';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export interface MonthlyStats {
   month: string;
@@ -58,18 +67,14 @@ export interface TraderAnalysis {
 
 function parseUserAddressesFromEnv(): string[] {
   const raw =
-    process.env.USER_ADDRESSES ||
+    stripQuotes(process.env.USER_ADDRESSES || '') ||
     (() => {
       try {
         const envPath = path.join(process.cwd(), '..', '.env');
         if (!fs.existsSync(envPath)) return '';
         const match = fs.readFileSync(envPath, 'utf-8').match(/^USER_ADDRESSES\s*=\s*(.+)$/m);
         if (!match) return '';
-        let v = match[1].trim();
-        if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) {
-          v = v.slice(1, -1);
-        }
-        return v;
+        return stripQuotes(match[1]);
       } catch {
         return '';
       }
@@ -79,15 +84,12 @@ function parseUserAddressesFromEnv(): string[] {
   if (!trimmed) return [];
   if (trimmed.startsWith('[')) {
     try {
-      return (JSON.parse(trimmed) as string[]).map((a) => a.toLowerCase().trim()).filter(Boolean);
+      return normalizeTraderAddresses(JSON.parse(trimmed) as string[]);
     } catch {
       return [];
     }
   }
-  return trimmed
-    .split(',')
-    .map((a) => a.trim().toLowerCase())
-    .filter(Boolean);
+  return normalizeTraderAddresses(trimmed.split(','));
 }
 
 function placeholderTrader(address: string): TraderAnalysis {
@@ -129,14 +131,38 @@ function placeholderTrader(address: string): TraderAnalysis {
   };
 }
 
+function alignToConfigured(
+  reports: TraderAnalysis[],
+  configured: string[]
+): TraderAnalysis[] {
+  if (configured.length === 0) return [];
+  const byAddr = new Map(
+    reports.map((t) => [t.address.toLowerCase(), t] as const)
+  );
+  return configured.map(
+    (addr) => byAddr.get(addr.toLowerCase()) || placeholderTrader(addr)
+  );
+}
+
 export async function GET() {
   try {
+    const envAddresses = parseUserAddressesFromEnv();
+    const configured = await getConfiguredTraderAddresses(
+      envAddresses.length > 0 ? envAddresses : getUserAddressesFromEnv()
+    );
+
     const reportsDir = path.join(process.cwd(), '..', 'trader_reports');
     const summaryPath = path.join(reportsDir, '_SUMMARY.json');
 
     if (fs.existsSync(summaryPath)) {
       const summaryData = fs.readFileSync(summaryPath, 'utf-8');
       const traders: TraderAnalysis[] = JSON.parse(summaryData);
+      if (configured.length > 0) {
+        return NextResponse.json({
+          traders: alignToConfigured(traders, configured),
+          source: 'reports+settings',
+        });
+      }
       return NextResponse.json({ traders, source: 'reports' });
     }
 
@@ -152,25 +178,30 @@ export async function GET() {
       }
 
       if (traders.length > 0) {
+        if (configured.length > 0) {
+          return NextResponse.json({
+            traders: alignToConfigured(traders, configured),
+            source: 'reports+settings',
+          });
+        }
         return NextResponse.json({ traders, source: 'reports' });
       }
     }
 
     // Coolify / paper mode: no analyze reports yet — list configured wallets
-    const addresses = parseUserAddressesFromEnv();
-    if (addresses.length > 0) {
+    if (configured.length > 0) {
       return NextResponse.json({
-        traders: addresses.map(placeholderTrader),
-        source: 'env',
+        traders: configured.map(placeholderTrader),
+        source: 'settings',
         message:
-          'Showing wallets from USER_ADDRESSES. Run npm run analyze for full P&L charts.',
+          'Showing wallets from Settings / USER_ADDRESSES. Run npm run analyze for full P&L charts.',
       });
     }
 
     return NextResponse.json(
       {
         error:
-          'No traders configured. Set USER_ADDRESSES or run npm run analyze to generate trader_reports.',
+          'No traders configured. Add wallets in Settings or set USER_ADDRESSES.',
       },
       { status: 404 }
     );
