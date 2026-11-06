@@ -10,6 +10,13 @@ export interface CopyTrade {
   matchedTrader: string | null;
   matchedTraderLabel: string | null;
   timeDiff: number | null;
+  /** Wallets that agreed / were copied for this bot entry */
+  agreeingTraders?: string[];
+  currentPrice?: number | null;
+  pnl?: number | null;
+  roi?: number | null;
+  paper?: boolean;
+  resolved?: boolean;
 }
 
 export interface TraderCopyStats {

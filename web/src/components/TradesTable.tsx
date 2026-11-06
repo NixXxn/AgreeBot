@@ -147,8 +147,9 @@ export function TradesTable() {
           <p className="text-center text-muted-foreground py-8">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">
-            No bot trades yet. Signals appear here when consensus fires or expires
-            (after the bot restarts with this update).
+            No bot trades yet. Entries accumulate in Mongo + a file ledger when
+            consensus fires or expires — they are not cleared when new ones arrive.
+            Full stats live under My Trades.
           </p>
         ) : (
           <Table>
@@ -157,6 +158,7 @@ export function TradesTable() {
                 <TableHead>When</TableHead>
                 <TableHead>Market</TableHead>
                 <TableHead>Side</TableHead>
+                <TableHead>Copied from</TableHead>
                 <TableHead className="text-right">Agreed</TableHead>
                 <TableHead className="text-center">Entered</TableHead>
                 <TableHead className="text-right">Size</TableHead>
@@ -172,23 +174,30 @@ export function TradesTable() {
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                     {formatTime(trade.createdAt)}
                   </TableCell>
-                  <TableCell className="max-w-[220px]">
+                  <TableCell className="max-w-[200px]">
                     <div className="font-medium truncate" title={trade.title}>
                       {trade.title}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {trade.outcome || '—'}
-                      {trade.agreeingTraders.length > 0 && (
-                        <span className="ml-1" title={trade.agreeingTraders.join(', ')}>
-                          · {trade.agreeingTraders.map(shortAddr).join(', ')}
-                        </span>
-                      )}
                     </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={trade.side === 'BUY' ? 'success' : 'destructive'}>
                       {trade.side}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-[180px]">
+                    {trade.agreeingTraders.length > 0 ? (
+                      <div
+                        className="text-xs font-mono text-muted-foreground break-all"
+                        title={trade.agreeingTraders.join('\n')}
+                      >
+                        {trade.agreeingTraders.map(shortAddr).join(', ')}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right font-mono">
                     {trade.agreementCount}

@@ -96,7 +96,10 @@ export function MyTradesTable({ byTrader }: MyTradesTableProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>My Copy Trades by Trader</CardTitle>
+        <CardTitle>My Copy Trades by Wallet</CardTitle>
+        <p className="text-sm text-muted-foreground mt-1">
+          Grouped by wallets that agreed / were copied. Expand a row for markets and P/L.
+        </p>
       </CardHeader>
       <CardContent>
         <Table>
@@ -218,13 +221,23 @@ function TradesList({
             <TableHead>Time</TableHead>
             <TableHead>Side</TableHead>
             <TableHead>Market</TableHead>
+            <TableHead>Copied from</TableHead>
             <TableHead className="text-right">Size</TableHead>
             <TableHead className="text-right">Price</TableHead>
-            <TableHead className="text-right">Delay</TableHead>
+            <TableHead className="text-right">P/L</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedTrades.slice(0, 50).map((trade, idx) => (
+          {sortedTrades.slice(0, 50).map((trade, idx) => {
+            const wallets =
+              trade.agreeingTraders && trade.agreeingTraders.length > 0
+                ? trade.agreeingTraders
+                : trade.matchedTrader
+                  ? [trade.matchedTrader]
+                  : [];
+            const short = (a: string) =>
+              a && a.length > 10 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+            return (
             <TableRow key={idx} className="text-sm">
               <TableCell className="text-xs text-muted-foreground">
                 {formatTime(trade.timestamp)}
@@ -244,17 +257,34 @@ function TradesList({
                   : trade.title}
                 <span className="text-muted-foreground ml-1">({trade.outcome})</span>
               </TableCell>
+              <TableCell
+                className="text-xs font-mono text-muted-foreground max-w-[160px]"
+                title={wallets.join('\n')}
+              >
+                {wallets.length > 0 ? wallets.map(short).join(', ') : '—'}
+              </TableCell>
               <TableCell className="text-right font-mono">
                 {formatCurrency(trade.usdcSize)}
               </TableCell>
               <TableCell className="text-right font-mono">
-                {(trade.price * 100).toFixed(1)}%
+                {(trade.price * 100).toFixed(1)}¢
               </TableCell>
-              <TableCell className="text-right font-mono text-muted-foreground">
-                {trade.timeDiff !== null ? `${trade.timeDiff}s` : '-'}
+              <TableCell
+                className={`text-right font-mono ${
+                  trade.pnl == null
+                    ? 'text-muted-foreground'
+                    : trade.pnl >= 0
+                      ? 'text-green-500'
+                      : 'text-red-500'
+                }`}
+              >
+                {trade.pnl == null
+                  ? '—'
+                  : `${trade.pnl >= 0 ? '+' : ''}${formatCurrency(trade.pnl)}`}
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
       {trades.length > 50 && (

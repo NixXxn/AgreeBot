@@ -18,7 +18,7 @@ export function MyTradesView() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [datePreset, setDatePreset] = useState<DatePreset>('30d');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
   const [customDateFrom, setCustomDateFrom] = useState<string>('');
   const [customDateTo, setCustomDateTo] = useState<string>('');
 
@@ -222,6 +222,16 @@ export function MyTradesView() {
         refreshing={refreshing}
         onRefresh={() => fetchData(true)}
       />
+
+      {data?.paperMode && (
+        <Card className="mb-4 p-4 border-yellow-500/40 bg-yellow-500/5">
+          <p className="text-sm font-medium">Paper trading ledger</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {data.message ||
+              'Accumulated paper entries with the same charts/stats as live My Trades. Expand a wallet below to see which addresses were copied.'}
+          </p>
+        </Card>
+      )}
 
       {/* Date Filter */}
       <Card className="mb-6 p-4">

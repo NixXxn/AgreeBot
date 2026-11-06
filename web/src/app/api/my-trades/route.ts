@@ -1,12 +1,29 @@
 import { NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import { buildPaperMyTradesResponse } from '@/lib/paperLedger';
+import { getRuntimeOverrides } from '@/lib/runtimeSettings';
+import { stripQuotes } from '@/lib/env';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const refresh = searchParams.get('refresh') === 'true';
 
   try {
+    const overrides = await getRuntimeOverrides();
+    const paperMode =
+      stripQuotes(overrides.PAPER_MODE || process.env.PAPER_MODE || getEnvValue('PAPER_MODE')) ===
+        'true' ||
+      stripQuotes(
+        overrides.PREVIEW_MODE || process.env.PREVIEW_MODE || getEnvValue('PREVIEW_MODE')
+      ) === 'true';
+
+    // Paper mode: accumulate from Mongo + JSONL ledger (same metrics shape as live My Trades)
+    if (paperMode) {
+      const paper = await buildPaperMyTradesResponse();
+      return NextResponse.json(paper);
+    }
+
     const reportsDir = path.join(process.cwd(), '..', 'trader_reports');
     const myTradesPath = path.join(reportsDir, '_MY_TRADES.json');
 
@@ -32,17 +49,13 @@ export async function GET(request: Request) {
 }
 
 function getEnvValue(key: string): string {
-  if (process.env[key]) return process.env[key] as string;
+  if (process.env[key]) return stripQuotes(process.env[key] as string);
   try {
     const envPath = path.join(process.cwd(), '..', '.env');
     if (!fs.existsSync(envPath)) return '';
     const match = fs.readFileSync(envPath, 'utf-8').match(new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm'));
     if (!match) return '';
-    let v = match[1].trim();
-    if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) {
-      v = v.slice(1, -1);
-    }
-    return v;
+    return stripQuotes(match[1]);
   } catch {
     return '';
   }
@@ -50,15 +63,17 @@ function getEnvValue(key: string): string {
 
 async function fetchLiveData(reportsDir: string) {
   const summaryPath = path.join(reportsDir, '_SUMMARY.json');
-  const paperMode =
-    getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
   const proxyWallet = getEnvValue('PROXY_WALLET');
 
-  // Paper mode / no wallet: return an empty but valid payload (no analyze required)
-  if (!fs.existsSync(summaryPath) && (paperMode || !proxyWallet)) {
+  if (!fs.existsSync(summaryPath) && !proxyWallet) {
+    // Still try paper ledger (e.g. paper flags only in Mongo overrides)
+    const paper = await buildPaperMyTradesResponse();
+    if (paper.summary.totalTrades > 0) {
+      return NextResponse.json(paper);
+    }
     return NextResponse.json({
       analysisDate: new Date().toISOString(),
-      myWallet: proxyWallet || 'paper-mode',
+      myWallet: 'paper-mode',
       paperMode: true,
       traders: [],
       allMyTrades: [],
@@ -77,9 +92,8 @@ async function fetchLiveData(reportsDir: string) {
         matchedTrades: 0,
         unmatchedTrades: 0,
       },
-      message: paperMode
-        ? 'Paper mode — no live copy trades yet. Consensus signals show in the Trades section on Traders.'
-        : 'No PROXY_WALLET configured. Set a wallet or run npm run analyze for historical reports.',
+      message:
+        'No PROXY_WALLET configured. Set a wallet or run npm run analyze for historical reports.',
     });
   }
 
