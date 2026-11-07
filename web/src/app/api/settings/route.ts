@@ -16,6 +16,47 @@ export const revalidate = 0;
 const ENV_PATH = path.join(process.cwd(), '..', '.env');
 const REPORTS_DIR = path.join(process.cwd(), '..', 'trader_reports');
 
+/** Ask the bot process to re-apply Mongo overrides (min agreement, strategy, …). */
+async function notifyBotRuntimeReload(): Promise<{
+  ok: boolean;
+  message: string;
+  minAgreement?: number;
+}> {
+  const healthPort = process.env.HEALTH_PORT || '3001';
+  try {
+    const res = await fetch(`http://127.0.0.1:${healthPort}/runtime/reload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      consensus?: { minAgreement?: number };
+      traders?: number;
+    };
+    if (!res.ok || body.ok === false) {
+      return {
+        ok: false,
+        message: body.error || `Bot reload failed (${res.status}) — restart the bot container`,
+      };
+    }
+    return {
+      ok: true,
+      minAgreement: body.consensus?.minAgreement,
+      message: `Bot reloaded (minAgreement=${body.consensus?.minAgreement ?? '?'}, traders=${body.traders ?? '?'})`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? `Bot not notified (${error.message}) — restart the bot container`
+          : 'Bot not notified — restart the bot container',
+    };
+  }
+}
+
 // Parse .env file into key-value pairs
 function parseEnvFile(content: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -473,13 +514,17 @@ export async function PUT(request: Request) {
       }
     }
 
+    const botReload = await notifyBotRuntimeReload();
+
     return NextResponse.json({
       success: true,
       settings,
       traderLabels,
       overrides: await getRuntimeOverrides().catch(() => ({})),
-      message:
-        'Settings saved to MongoDB. Restart the bot container so the trading process reloads the new trader list.',
+      botReload,
+      message: botReload.ok
+        ? `Settings saved. ${botReload.message}`
+        : `Settings saved to MongoDB. ${botReload.message}`,
     });
   } catch (error) {
     console.error('Error updating settings:', error);

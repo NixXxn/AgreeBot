@@ -129,6 +129,17 @@ export const main = async () => {
         } else if (ENV.PAPER_MODE) {
             Logger.info('Auto resolver skipped (paper mode)');
         }
+
+        // Pick up dashboard Settings changes even if the save-time notify missed
+        setInterval(() => {
+            applyRuntimeOverrides().catch((error) => {
+                Logger.warning(
+                    `Periodic runtime reload failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            });
+        }, 30_000);
     } catch (error) {
         Logger.error(`Fatal error during startup: ${error}`);
         await gracefulShutdown('startup-error');

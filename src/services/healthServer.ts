@@ -76,6 +76,35 @@ export const startHealthServer = (): void => {
             return;
         }
 
+        // Dashboard Settings save → re-apply Mongo overrides without container restart
+        if (url === '/runtime/reload' && method === 'POST') {
+            try {
+                const { applyRuntimeOverrides } = await import('./runtimeSettings');
+                await applyRuntimeOverrides();
+                Logger.success(
+                    `Runtime settings reloaded (minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length})`
+                );
+                json(res, 200, {
+                    ok: true,
+                    traders: ENV.USER_ADDRESSES.length,
+                    consensus: {
+                        enabled: ENV.CONSENSUS_ENABLED,
+                        minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
+                        windowSeconds: ENV.CONSENSUS_WINDOW_SECONDS,
+                        applyTo: ENV.CONSENSUS_APPLY_TO,
+                        sizeMode: ENV.CONSENSUS_SIZE_MODE,
+                    },
+                    paperMode: ENV.PAPER_MODE,
+                });
+            } catch (error) {
+                json(res, 500, {
+                    ok: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+            return;
+        }
+
         json(res, 404, { error: 'not found' });
     });
 
