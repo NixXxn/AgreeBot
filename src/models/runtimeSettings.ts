@@ -7,6 +7,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface RuntimeSettingsDocument extends Document {
     _id: string;
     values: Record<string, string>;
+    /** SHA-256 of last-seen Coolify USER_ADDRESSES — used to detect env edits. */
+    coolifyUserAddressesFp?: string;
     updatedAt: Date;
 }
 
@@ -14,6 +16,7 @@ const runtimeSettingsSchema = new Schema(
     {
         _id: { type: String, required: true },
         values: { type: Schema.Types.Mixed, default: {} },
+        coolifyUserAddressesFp: { type: String, required: false },
         updatedAt: { type: Date, default: Date.now },
     },
     { collection: 'runtime_settings' }

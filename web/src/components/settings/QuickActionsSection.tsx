@@ -26,6 +26,11 @@ export function QuickActionsSection({
 }: QuickActionsSectionProps) {
   const [actionStates, setActionStates] = useState<Record<string, ActionState>>({});
   const [manualSellKeyword, setManualSellKeyword] = useState('');
+  const [resettingPaper, setResettingPaper] = useState(false);
+  const [paperResetResult, setPaperResetResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   const walletActions = new Set<ActionType>([
     'check-stats',
@@ -34,6 +39,33 @@ export function QuickActionsSection({
     'redeem-resolved',
     'close-stale',
   ]);
+
+  const resetPaperStats = async () => {
+    if (
+      !window.confirm(
+        'Reset all paper-mode stats? This deletes paper trades, P/L history, and open paper positions. Cannot be undone.'
+      )
+    ) {
+      return;
+    }
+    setResettingPaper(true);
+    setPaperResetResult(null);
+    try {
+      const response = await fetch('/api/paper/reset', { method: 'POST' });
+      const result = await response.json();
+      setPaperResetResult({
+        success: Boolean(result.success),
+        message: result.message || result.error || (result.success ? 'Reset complete' : 'Reset failed'),
+      });
+    } catch (error) {
+      setPaperResetResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setResettingPaper(false);
+    }
+  };
 
   const executeAction = async (action: ActionType, params?: { keyword?: string }) => {
     setActionStates(prev => ({
@@ -158,7 +190,7 @@ export function QuickActionsSection({
             <Alert variant="warning">
               <AlertTitle>Paper mode</AlertTitle>
               <AlertDescription>
-                Close / redeem / sell need a live wallet. Health Check still works.
+                Close / redeem / sell need a live wallet. Health Check and Reset Paper Stats still work.
                 Disable Paper mode and set PROXY_WALLET + PRIVATE_KEY to use the others.
               </AlertDescription>
             </Alert>
@@ -186,7 +218,32 @@ export function QuickActionsSection({
                 </Button>
               );
             })}
+
+            {paperMode && (
+              <Button
+                variant="destructive"
+                className="h-auto py-3 flex flex-col items-start text-left"
+                onClick={resetPaperStats}
+                disabled={resettingPaper}
+              >
+                <span className="font-medium">
+                  {resettingPaper ? 'Resetting…' : 'Reset Paper Stats'}
+                </span>
+                <span className="text-xs opacity-70 font-normal">
+                  Clear paper trades, P/L, and open positions
+                </span>
+              </Button>
+            )}
           </div>
+
+          {paperResetResult && (
+            <Alert variant={paperResetResult.success ? 'success' : 'destructive'}>
+              <AlertTitle>
+                Reset paper stats: {paperResetResult.success ? 'Success' : 'Failed'}
+              </AlertTitle>
+              <AlertDescription>{paperResetResult.message}</AlertDescription>
+            </Alert>
+          )}
 
           {/* Manual Sell */}
           <div className="p-4 border rounded-lg space-y-3">

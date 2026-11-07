@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { getDb } from './mongo';
 import { stripQuotes } from './env';
 
@@ -5,6 +6,14 @@ const COLLECTION = 'runtime_settings';
 const DOC_ID = 'overrides';
 
 const ETH_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
+type RuntimeDoc = {
+  _id: string;
+  values?: Record<string, string>;
+  /** SHA-256 of last-seen Coolify USER_ADDRESSES (detect env edits). */
+  coolifyUserAddressesFp?: string;
+  updatedAt?: Date;
+};
 
 /** Normalize wallet addresses: strip quotes, lowercase, validate, dedupe. */
 export function normalizeTraderAddresses(traders: string[]): string[] {
@@ -24,6 +33,98 @@ export function normalizeTraderAddresses(traders: string[]): string[] {
   return out;
 }
 
+function fingerprintUserAddresses(raw: string): string {
+  return createHash('sha256').update(stripQuotes(raw)).digest('hex');
+}
+
+function parseAddressesRaw(raw: string): string[] {
+  const trimmed = stripQuotes(raw);
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      return normalizeTraderAddresses(JSON.parse(trimmed) as string[]);
+    } catch {
+      /* fall through */
+    }
+  }
+  return normalizeTraderAddresses(trimmed.split(','));
+}
+
+/**
+ * If Coolify USER_ADDRESSES changed since last container boot, adopt it into Mongo.
+ * First boot after this feature: baseline fingerprint only (keep existing Mongo list).
+ */
+export async function syncCoolifyUserAddresses(
+  coolifyRaw: string
+): Promise<{ adopted: boolean; count: number }> {
+  const db = await getDb();
+  if (!db) return { adopted: false, count: 0 };
+
+  const raw = stripQuotes(coolifyRaw || '');
+  const fp = fingerprintUserAddresses(raw);
+  const addresses = parseAddressesRaw(raw);
+
+  try {
+    const col = db.collection<RuntimeDoc>(COLLECTION);
+    const doc = await col.findOne({ _id: DOC_ID });
+    const prevFp = doc?.coolifyUserAddressesFp;
+
+    if (prevFp === undefined) {
+      await col.updateOne(
+        { _id: DOC_ID },
+        {
+          $set: {
+            coolifyUserAddressesFp: fp,
+            updatedAt: new Date(),
+          },
+          $setOnInsert: { values: {} },
+        },
+        { upsert: true }
+      );
+      return { adopted: false, count: addresses.length };
+    }
+
+    if (prevFp === fp) {
+      return { adopted: false, count: addresses.length };
+    }
+
+    // Coolify env changed — ignore empty (misconfig) so we don't wipe Settings
+    if (addresses.length === 0) {
+      await col.updateOne(
+        { _id: DOC_ID },
+        { $set: { coolifyUserAddressesFp: fp, updatedAt: new Date() } }
+      );
+      console.warn(
+        'Coolify USER_ADDRESSES changed but parsed empty — keeping Mongo trader list'
+      );
+      return { adopted: false, count: 0 };
+    }
+
+    const existing = doc?.values && typeof doc.values === 'object' ? { ...doc.values } : {};
+    existing.USER_ADDRESSES = addresses.join(',');
+
+    await col.updateOne(
+      { _id: DOC_ID },
+      {
+        $set: {
+          values: existing,
+          coolifyUserAddressesFp: fp,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    console.log(
+      `Coolify USER_ADDRESSES changed — adopted ${addresses.length} trader(s) into Mongo`
+    );
+    return { adopted: true, count: addresses.length };
+  } catch (error) {
+    console.error('Failed to sync Coolify USER_ADDRESSES:', error);
+    return { adopted: false, count: addresses.length };
+  }
+}
+
 export async function getRuntimeOverrides(options?: {
   /** When true, Mongo read failures throw instead of returning {}. */
   required?: boolean;
@@ -38,7 +139,6 @@ export async function getRuntimeOverrides(options?: {
   }
 
   try {
-    type RuntimeDoc = { _id: string; values?: Record<string, string> };
     const doc = await db
       .collection<RuntimeDoc>(COLLECTION)
       .findOne({ _id: DOC_ID });
@@ -62,11 +162,14 @@ export async function getRuntimeOverrides(options?: {
 /**
  * Merge dashboard overrides into env.
  * Empty-string overrides win (explicit clear) and must not fall back to Coolify.
+ * Coolify USER_ADDRESSES edits are synced into Mongo first (then still win via override).
  */
 export async function getMergedEnv(
   base: Record<string, string>,
   options?: { required?: boolean }
 ): Promise<Record<string, string>> {
+  const coolifyRaw = base.USER_ADDRESSES ?? process.env.USER_ADDRESSES ?? '';
+  await syncCoolifyUserAddresses(coolifyRaw);
   const overrides = await getRuntimeOverrides(options);
   return { ...base, ...overrides };
 }
@@ -128,11 +231,16 @@ export async function saveRuntimeOverrides(
   return verified;
 }
 
-/** Configured traders: Mongo overrides win over Coolify / .env. */
+/** Configured traders: Mongo overrides win over Coolify / .env (after Coolify sync). */
 export async function getConfiguredTraderAddresses(
   fallbackEnvAddresses: string[]
 ): Promise<string[]> {
   try {
+    const coolifyRaw =
+      process.env.USER_ADDRESSES ||
+      (fallbackEnvAddresses.length > 0 ? fallbackEnvAddresses.join(',') : '');
+    await syncCoolifyUserAddresses(coolifyRaw);
+
     const overrides = await getRuntimeOverrides();
     if (Object.prototype.hasOwnProperty.call(overrides, 'USER_ADDRESSES')) {
       const raw = overrides.USER_ADDRESSES ?? '';

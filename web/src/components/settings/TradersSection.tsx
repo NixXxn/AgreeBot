@@ -76,7 +76,8 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
       <CardHeader>
         <CardTitle>Traders to Copy</CardTitle>
         <CardDescription>
-          Manage the list of traders whose trades will be copied
+          Saved to MongoDB (survives Coolify restarts). Updating USER_ADDRESSES in
+          Coolify and restarting also replaces this list.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

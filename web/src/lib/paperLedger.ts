@@ -32,6 +32,71 @@ function shortLabel(address: string): string {
   return `0x…${address.slice(-4)}`;
 }
 
+/** Delete paper history from Mongo + ledger file. Optionally notify the bot to clear its in-memory book. */
+export async function resetPaperStats(): Promise<{
+  deletedMongo: number;
+  clearedLedger: boolean;
+  botNotified: boolean;
+  botMessage?: string;
+}> {
+  let deletedMongo = 0;
+  let clearedLedger = false;
+  let botNotified = false;
+  let botMessage: string | undefined;
+
+  try {
+    const db = await getDb();
+    if (db) {
+      const result = await db.collection('bot_signals').deleteMany({ paper: true });
+      deletedMongo = result.deletedCount ?? 0;
+    }
+  } catch (error) {
+    console.error('Failed to delete paper bot_signals:', error);
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to delete paper signals from MongoDB');
+  }
+
+  try {
+    const dir = path.dirname(LEDGER_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(LEDGER_PATH, '', 'utf-8');
+    clearedLedger = true;
+  } catch (error) {
+    console.error('Failed to clear paper_ledger.jsonl:', error);
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to clear paper ledger file');
+  }
+
+  const healthPort = process.env.HEALTH_PORT || '3001';
+  try {
+    const res = await fetch(`http://127.0.0.1:${healthPort}/paper/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      clearedOpenPositions?: number;
+    };
+    botNotified = res.ok && body.ok !== false;
+    botMessage = botNotified
+      ? `Bot paper book cleared (${body.clearedOpenPositions ?? 0} open)`
+      : body.error || `Bot responded ${res.status}`;
+  } catch (error) {
+    botMessage =
+      error instanceof Error
+        ? `Bot not notified (${error.message}) — restart bot to clear open paper positions`
+        : 'Bot not notified — restart bot to clear open paper positions';
+  }
+
+  return { deletedMongo, clearedLedger, botNotified, botMessage };
+}
+
 /** Load append-only JSONL backup written by the bot (survives some Mongo wipes). */
 export function readLedgerFile(): LedgerSignal[] {
   try {

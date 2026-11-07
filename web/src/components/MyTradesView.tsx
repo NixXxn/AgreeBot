@@ -21,6 +21,7 @@ export function MyTradesView() {
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
   const [customDateFrom, setCustomDateFrom] = useState<string>('');
   const [customDateTo, setCustomDateTo] = useState<string>('');
+  const [resetting, setResetting] = useState(false);
 
   const fetchData = async (refresh = false) => {
     try {
@@ -48,6 +49,29 @@ export function MyTradesView() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const resetPaperStats = async () => {
+    if (
+      !window.confirm(
+        'Reset all paper-mode stats? This deletes paper trades, P/L history, and open paper positions. Cannot be undone.'
+      )
+    ) {
+      return;
+    }
+    try {
+      setResetting(true);
+      const res = await fetch('/api/paper/reset', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to reset paper stats');
+      }
+      await fetchData(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset paper stats');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // Filter trades by date
   const filteredData = useMemo(() => {
@@ -225,11 +249,24 @@ export function MyTradesView() {
 
       {data?.paperMode && (
         <Card className="mb-4 p-4 border-yellow-500/40 bg-yellow-500/5">
-          <p className="text-sm font-medium">Paper trading ledger</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            {data.message ||
-              'Accumulated paper entries with the same charts/stats as live My Trades. Expand a wallet below to see which addresses were copied.'}
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Paper trading ledger</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {data.message ||
+                  'Accumulated paper entries with the same charts/stats as live My Trades. Expand a wallet below to see which addresses were copied.'}
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={resetPaperStats}
+              disabled={resetting}
+              className="shrink-0"
+            >
+              {resetting ? 'Resetting…' : 'Reset paper stats'}
+            </Button>
+          </div>
         </Card>
       )}
 

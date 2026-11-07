@@ -82,6 +82,16 @@ export const hasOpenPaperPosition = (asset: string): boolean => {
     return Boolean(pos && pos.tokens > 1e-8);
 };
 
+/** Wipe in-memory paper book (e.g. after dashboard Reset Paper Stats). */
+export const clearPaperBook = (): number => {
+    const n = book.size;
+    book.clear();
+    Logger.info(`Paper book cleared (${n} open position(s) removed)`);
+    return n;
+};
+
+export const getOpenPaperPositionCount = (): number => book.size;
+
 /**
  * Apply a paper fill to the book. Returns tokens/size actually applied.
  */
