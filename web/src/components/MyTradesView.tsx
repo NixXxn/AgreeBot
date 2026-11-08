@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { MyTradesResponse, CopyTrade, TraderCopyStats } from '@/types/myTrades';
+import { MyTradesResponse } from '@/types/myTrades';
 import { CopyPnLBarChart } from '@/components/charts/CopyPnLBarChart';
 import { TradesCountChart } from '@/components/charts/TradesCountChart';
 import { CopyTimelineChart } from '@/components/charts/CopyTimelineChart';
@@ -10,6 +10,7 @@ import { MyTradesTable } from '@/components/MyTradesTable';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { StatusBar } from '@/components/StatusBar';
+import { buildByTraderStats, summarizeCopyTrades } from '@/lib/copyTradeStats';
 
 type DatePreset = '7d' | '30d' | '90d' | 'all';
 
@@ -110,72 +111,13 @@ export function MyTradesView() {
       (t) => t.timestamp >= startTimestamp && t.timestamp <= endTimestamp
     );
 
-    // Recalculate byTrader stats for filtered trades
-    const byTraderMap = new Map<string, CopyTrade[]>();
-    byTraderMap.set('unmatched', []);
-    for (const trader of traders) {
-      byTraderMap.set(trader.address.toLowerCase(), []);
-    }
-
-    for (const trade of filteredTrades) {
-      if (trade.matchedTrader) {
-        const key = trade.matchedTrader.toLowerCase();
-        const existing = byTraderMap.get(key) || [];
-        existing.push(trade);
-        byTraderMap.set(key, existing);
-      } else {
-        const unmatched = byTraderMap.get('unmatched') || [];
-        unmatched.push(trade);
-        byTraderMap.set('unmatched', unmatched);
-      }
-    }
-
-    const byTrader: TraderCopyStats[] = traders.map((trader) => {
-      const trades = byTraderMap.get(trader.address.toLowerCase()) || [];
-      let totalBought = 0;
-      let totalSold = 0;
-
-      for (const trade of trades) {
-        if (trade.side === 'BUY') totalBought += trade.usdcSize;
-        else totalSold += trade.usdcSize;
-      }
-
-      return {
-        traderAddress: trader.address,
-        traderLabel: trader.label,
-        trades,
-        totalBought,
-        totalSold,
-        tradeCount: trades.length,
-        pnl: totalSold - totalBought,
-        roi: totalBought > 0 ? ((totalSold - totalBought) / totalBought) * 100 : 0,
-      };
-    });
-
-    // Add unmatched
-    const unmatchedTrades = byTraderMap.get('unmatched') || [];
-    if (unmatchedTrades.length > 0) {
-      let totalBought = 0;
-      let totalSold = 0;
-      for (const trade of unmatchedTrades) {
-        if (trade.side === 'BUY') totalBought += trade.usdcSize;
-        else totalSold += trade.usdcSize;
-      }
-      byTrader.push({
-        traderAddress: 'unmatched',
-        traderLabel: 'Unmatched Trades',
-        trades: unmatchedTrades,
-        totalBought,
-        totalSold,
-        tradeCount: unmatchedTrades.length,
-        pnl: totalSold - totalBought,
-        roi: totalBought > 0 ? ((totalSold - totalBought) / totalBought) * 100 : 0,
-      });
-    }
-
-    byTrader.sort((a, b) => b.tradeCount - a.tradeCount);
-
-    const matchedCount = filteredTrades.filter((t) => t.matchedTrader).length;
+    const paperMode = Boolean(data.paperMode);
+    const byTrader = buildByTraderStats(filteredTrades, traders, { paperMode });
+    const flow = summarizeCopyTrades(filteredTrades, { paperMode });
+    const matchedCount = filteredTrades.filter(
+      (t) =>
+        (t.agreeingTraders && t.agreeingTraders.length > 0) || Boolean(t.matchedTrader)
+    ).length;
 
     return {
       ...data,
@@ -185,8 +127,8 @@ export function MyTradesView() {
       byTrader,
       summary: {
         totalTrades: filteredTrades.length,
-        totalBought: filteredTrades.filter((t) => t.side === 'BUY').reduce((s, t) => s + t.usdcSize, 0),
-        totalSold: filteredTrades.filter((t) => t.side === 'SELL').reduce((s, t) => s + t.usdcSize, 0),
+        totalBought: flow.totalBought,
+        totalSold: flow.totalSold,
         matchedTrades: matchedCount,
         unmatchedTrades: filteredTrades.length - matchedCount,
       },
@@ -227,7 +169,11 @@ export function MyTradesView() {
   const realPnL = data?.positions?.totalPnL ?? 0;
   const unrealizedPnL = data?.positions?.unrealizedPnL ?? 0;
   const realizedPnL = data?.positions?.realizedPnL ?? 0;
-  const cashFlowPnL = filteredData.byTrader.reduce((sum, t) => sum + t.pnl, 0);
+  // Paper: mark-to-market (incl. resolved BUYs without SELL rows). Live: cashflow.
+  const cashFlowPnL = filteredData
+    ? filteredData.byTrader.reduce((sum, t) => sum + t.pnl, 0)
+    : 0;
+  const paperMode = Boolean(data?.paperMode);
 
   const matchRate =
     filteredData.summary.totalTrades > 0
@@ -378,18 +324,22 @@ export function MyTradesView() {
         </div>
       </div>
 
-      {/* Cash Flow info (for reference) */}
+      {/* Cash flow / settled proceeds */}
       <Card className="mb-6 p-4">
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-muted-foreground">Cash Flow (Sold - Bought):</span>
+        <div className="flex items-center gap-4 text-sm flex-wrap">
+          <span className="text-muted-foreground">
+            {paperMode ? 'Settled P/L (resolved exits):' : 'Cash Flow (Sold - Bought):'}
+          </span>
           <span className={cashFlowPnL >= 0 ? 'text-green-500' : 'text-red-500'}>
             {cashFlowPnL >= 0 ? '+' : '-'}${Math.abs(cashFlowPnL).toFixed(2)}
           </span>
           <span className="text-muted-foreground">|</span>
-          <span className="text-muted-foreground">Total Sold:</span>
+          <span className="text-muted-foreground">
+            {paperMode ? 'Exit value (Sold + settled):' : 'Total Sold:'}
+          </span>
           <span>${filteredData.summary.totalSold.toFixed(2)}</span>
           <span className="text-muted-foreground">|</span>
-          <span className="text-muted-foreground">Positions:</span>
+          <span className="text-muted-foreground">Open positions:</span>
           <span>{data?.positions?.total ?? 0}</span>
         </div>
       </Card>

@@ -3,7 +3,8 @@ import * as path from 'path';
 import { getDb } from './mongo';
 import { computePnL, resolveTokenPrice, type PriceInfo } from './tokenPrice';
 import type { BotTradeRow } from '@/types/trades';
-import type { CopyTrade, MyTradesResponse, TraderCopyStats } from '@/types/myTrades';
+import type { CopyTrade, MyTradesResponse } from '@/types/myTrades';
+import { buildByTraderStats, summarizeCopyTrades } from '@/lib/copyTradeStats';
 
 const LEDGER_PATH = path.join(process.cwd(), '..', 'trader_reports', 'paper_ledger.jsonl');
 
@@ -290,49 +291,8 @@ export async function buildPaperMyTradesResponse(): Promise<MyTradesResponse> {
     label: shortLabel(address),
   }));
 
-  const byTraderMap = new Map<string, CopyTrade[]>();
-  for (const trader of traders) byTraderMap.set(trader.address, []);
-
-  for (const trade of allMyTrades) {
-    const wallets =
-      trade.agreeingTraders && trade.agreeingTraders.length > 0
-        ? trade.agreeingTraders
-        : trade.matchedTrader
-          ? [trade.matchedTrader]
-          : [];
-    for (const w of wallets) {
-      const key = w.toLowerCase();
-      const list = byTraderMap.get(key) || [];
-      list.push(trade);
-      byTraderMap.set(key, list);
-    }
-  }
-
-  const byTrader: TraderCopyStats[] = traders
-    .map((trader) => {
-      const list = byTraderMap.get(trader.address) || [];
-      let totalBought = 0;
-      let totalSold = 0;
-      let pnl = 0;
-      for (const trade of list) {
-        // Proportional attribution across agreeing wallets
-        const share = 1 / Math.max(trade.agreeingTraders?.length || 1, 1);
-        if (trade.side === 'BUY') totalBought += trade.usdcSize * share;
-        else totalSold += trade.usdcSize * share;
-        pnl += (trade.pnl ?? 0) * share;
-      }
-      return {
-        traderAddress: trader.address,
-        traderLabel: trader.label,
-        trades: list,
-        totalBought,
-        totalSold,
-        tradeCount: list.length,
-        pnl,
-        roi: totalBought > 0 ? (pnl / totalBought) * 100 : 0,
-      };
-    })
-    .sort((a, b) => b.tradeCount - a.tradeCount);
+  const byTrader = buildByTraderStats(allMyTrades, traders, { paperMode: true });
+  const flow = summarizeCopyTrades(allMyTrades, { paperMode: true });
 
   const realized = entered
     .filter((t) => t.resolved && t.pnl != null)
@@ -359,12 +319,8 @@ export async function buildPaperMyTradesResponse(): Promise<MyTradesResponse> {
     },
     summary: {
       totalTrades: summary.entered,
-      totalBought: entered
-        .filter((t) => t.side === 'BUY')
-        .reduce((s, t) => s + t.sizeUsd, 0),
-      totalSold: entered
-        .filter((t) => t.side === 'SELL')
-        .reduce((s, t) => s + t.sizeUsd, 0),
+      totalBought: flow.totalBought,
+      totalSold: flow.totalSold,
       matchedTrades: entered.filter((t) => t.agreeingTraders.length > 0).length,
       unmatchedTrades: entered.filter((t) => t.agreeingTraders.length === 0).length,
     },
