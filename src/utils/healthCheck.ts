@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { ENV } from '../config/env';
 import getMyBalance from './getMyBalance';
 import { fetchUserPositions } from './polymarketData';
+import { probeRpcUrl, resolveRpcUrlList } from './rpcProvider';
 import Logger from './logger';
 
 export interface HealthCheckResult {
@@ -49,37 +50,33 @@ export const performHealthCheck = async (): Promise<HealthCheckResult> => {
         };
     }
 
-    // Check RPC endpoint (optional in paper mode)
+    // Check RPC endpoint (try primary + public fallbacks; polygon-rpc.com is dead)
     if (ENV.PAPER_MODE && !ENV.RPC_URL) {
         checks.rpc = { status: 'ok', message: 'Skipped (paper mode)' };
     } else {
-        try {
-            const response = await fetch(ENV.RPC_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    method: 'eth_blockNumber',
-                    params: [],
-                    id: 1,
-                }),
-                signal: AbortSignal.timeout(5000), // 5 second timeout
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                if (data.result) {
-                    checks.rpc = { status: 'ok', message: 'RPC endpoint responding' };
-                } else {
-                    checks.rpc = { status: 'error', message: 'Invalid RPC response' };
-                }
-            } else {
-                checks.rpc = { status: 'error', message: `HTTP ${response.status}` };
+        const urls = resolveRpcUrlList();
+        let rpcOk = false;
+        const failures: string[] = [];
+        for (const url of urls) {
+            const probe = await probeRpcUrl(url);
+            if (probe.ok) {
+                const host = url.replace(/^https?:\/\//, '').split('/')[0];
+                checks.rpc = {
+                    status: 'ok',
+                    message:
+                        url === urls[0]
+                            ? `RPC ok (${host})`
+                            : `RPC ok via fallback (${host})`,
+                };
+                rpcOk = true;
+                break;
             }
-        } catch (error) {
+            failures.push(`${url}: ${probe.message}`);
+        }
+        if (!rpcOk) {
             checks.rpc = {
                 status: 'error',
-                message: `RPC check failed: ${error instanceof Error ? error.message : String(error)}`,
+                message: failures[0] || 'All RPC endpoints failed',
             };
         }
     }

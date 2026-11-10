@@ -3,11 +3,11 @@ import { ClobClient } from '@polymarket/clob-client';
 import { SignatureType } from '@polymarket/order-utils';
 import { ENV } from '../config/env';
 import Logger from './logger';
+import { createPolygonProvider } from './rpcProvider';
 
 const PROXY_WALLET = ENV.PROXY_WALLET;
 const PRIVATE_KEY = ENV.PRIVATE_KEY;
 const CLOB_HTTP_URL = ENV.CLOB_HTTP_URL;
-const RPC_URL = ENV.RPC_URL;
 
 /** POLY_1271 deposit wallets use signature type 3 (not yet in order-utils enum). */
 const POLY_1271 = 3 as SignatureType;
@@ -17,7 +17,7 @@ const POLY_1271 = 3 as SignatureType;
  */
 const isGnosisSafe = async (address: string): Promise<boolean> => {
     try {
-        const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+        const provider = await createPolygonProvider();
         const code = await provider.getCode(address);
         return code !== '0x';
     } catch (error) {

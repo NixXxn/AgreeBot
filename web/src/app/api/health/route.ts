@@ -49,35 +49,66 @@ export async function GET() {
     getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
 
   try {
-    const rpcUrl = getEnvValue('RPC_URL');
-    if (!rpcUrl) {
-      if (paperMode) {
-        result.checks.rpc = { status: 'ok', message: 'Skipped (paper mode)' };
-      } else {
-        result.checks.rpc = { status: 'error', message: 'RPC_URL not configured' };
-        result.healthy = false;
-      }
-    } else {
-      const response = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_blockNumber',
-          params: [],
-          id: 1,
-        }),
-      });
+    // polygon-rpc.com is dead (401). Prefer configured URL, then public fallbacks.
+    const fallbacks = [
+      'https://polygon-bor-rpc.publicnode.com',
+      'https://1rpc.io/matic',
+      'https://polygon.drpc.org',
+    ];
+    const configured = getEnvValue('RPC_URL');
+    const urls = [
+      ...(configured ? [configured] : []),
+      ...fallbacks.filter((u) => u !== configured),
+    ];
 
-      if (!response.ok) {
-        result.checks.rpc = { status: 'error', message: `RPC returned ${response.status}` };
-        result.healthy = false;
-      } else {
-        const data = await response.json();
-        if (data.error) {
-          result.checks.rpc = { status: 'error', message: data.error.message };
-          result.healthy = false;
+    if (urls.length === 0 && paperMode) {
+      result.checks.rpc = { status: 'ok', message: 'Skipped (paper mode)' };
+    } else {
+      let ok = false;
+      let lastErr = 'RPC_URL not configured';
+      for (const rpcUrl of urls) {
+        try {
+          const response = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'eth_chainId',
+              params: [],
+              id: 1,
+            }),
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!response.ok) {
+            lastErr = `RPC returned ${response.status}`;
+            continue;
+          }
+          const data = await response.json();
+          if (data.error) {
+            lastErr = data.error.message || 'RPC error';
+            continue;
+          }
+          if (data.result !== '0x89') {
+            lastErr = `Unexpected chainId ${data.result || 'missing'}`;
+            continue;
+          }
+          const host = rpcUrl.replace(/^https?:\/\//, '').split('/')[0];
+          result.checks.rpc = {
+            status: 'ok',
+            message:
+              configured && rpcUrl === configured
+                ? `OK (${host})`
+                : `OK via fallback (${host})`,
+          };
+          ok = true;
+          break;
+        } catch (error) {
+          lastErr = error instanceof Error ? error.message : String(error);
         }
+      }
+      if (!ok) {
+        result.checks.rpc = { status: 'error', message: lastErr };
+        result.healthy = false;
       }
     }
   } catch (error) {

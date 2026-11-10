@@ -50,7 +50,12 @@ export POLY_PRIVATE_KEY POLY_FUNDER POLY_SIGNATURE_TYPE
 export RELAYER_API_KEY RELAYER_API_KEY_ADDRESS
 export DASHBOARD_USER DASHBOARD_TOKEN
 MONGO_URI="$(strip_q "${MONGO_URI:-}")"
-RPC_URL="$(strip_q "${RPC_URL:-}")"
+# polygon-rpc.com is dead (401); default to a working public Polygon RPC
+RPC_URL="$(strip_q "${RPC_URL:-https://polygon-bor-rpc.publicnode.com}")"
+if [ -z "$RPC_URL" ]; then
+  RPC_URL="https://polygon-bor-rpc.publicnode.com"
+fi
+export RPC_URL
 CLOB_HTTP_URL="$(strip_q "${CLOB_HTTP_URL:-https://clob.polymarket.com/}")"
 CLOB_WS_URL="$(strip_q "${CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}")"
 USDC_CONTRACT_ADDRESS="$(strip_q "${USDC_CONTRACT_ADDRESS:-0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174}")"

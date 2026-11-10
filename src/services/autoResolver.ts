@@ -57,14 +57,21 @@ let isRunning = true;
 let provider: ethers.providers.JsonRpcProvider | null = null;
 let wallet: ethers.Wallet | null = null;
 let ctfContract: ethers.Contract | null = null;
+let contractInit: Promise<void> | null = null;
 
-const getContract = () => {
-    if (!provider) {
-        provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-        wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-        ctfContract = new ethers.Contract(CTF_CONTRACT_ADDRESS, CTF_ABI, wallet);
+const getContract = async () => {
+    if (!provider || !wallet || !ctfContract) {
+        if (!contractInit) {
+            contractInit = (async () => {
+                const { createPolygonProvider } = await import('../utils/rpcProvider');
+                provider = await createPolygonProvider(RPC_URL);
+                wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+                ctfContract = new ethers.Contract(CTF_CONTRACT_ADDRESS, CTF_ABI, wallet);
+            })();
+        }
+        await contractInit;
     }
-    return { provider, wallet: wallet!, ctfContract: ctfContract! };
+    return { provider: provider!, wallet: wallet!, ctfContract: ctfContract! };
 };
 
 /**
@@ -226,7 +233,7 @@ const trySellPosition = async (
  */
 const redeemPosition = async (position: Position): Promise<{ success: boolean; error?: string }> => {
     try {
-        const { ctfContract, provider } = getContract();
+        const { ctfContract, provider } = await getContract();
 
         // Convert conditionId to bytes32 format
         const conditionIdBytes32 = ethers.utils.hexZeroPad(
