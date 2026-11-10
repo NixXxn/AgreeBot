@@ -105,7 +105,12 @@ export const performHealthCheck = async (): Promise<HealthCheckResult> => {
                     };
                 }
             } else {
-                checks.balance = { status: 'error', message: 'Zero balance' };
+                checks.balance = {
+                    status: 'error',
+                    message:
+                        'Zero CLOB collateral — Polymarket trading cash is $0 (wallet ERC-20 can still look funded in the UI if misread). Deposit USDC into your Polymarket balance.',
+                    balance: 0,
+                };
             }
         } catch (error) {
             checks.balance = {
