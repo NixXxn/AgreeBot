@@ -106,6 +106,9 @@ export function TradesTable() {
                     </span>
                   </>
                 )}
+                {typeof summary.limit === 'number' && (
+                  <> · last {summary.limit}</>
+                )}
               </p>
             )}
           </div>

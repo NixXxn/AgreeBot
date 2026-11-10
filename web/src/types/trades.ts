@@ -30,7 +30,9 @@ export interface TradesResponse {
     totalPnl: number;
     paper: boolean;
     resolved?: number;
+    limit?: number;
   };
+  paperMode?: boolean;
   error?: string;
   fetchedAt?: string;
 }

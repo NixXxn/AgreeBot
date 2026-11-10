@@ -177,7 +177,15 @@ async function priceMapFor(
   return priceMap;
 }
 
-export async function buildBotTradeRows(signals?: LedgerSignal[]): Promise<{
+export async function buildBotTradeRows(
+  signals?: LedgerSignal[],
+  options?: {
+    /** When set, only include paper or live rows — never mix in the summary. */
+    paperMode?: boolean;
+    /** Newest-first cap (default unlimited). */
+    limit?: number;
+  }
+): Promise<{
   trades: BotTradeRow[];
   summary: {
     total: number;
@@ -188,7 +196,24 @@ export async function buildBotTradeRows(signals?: LedgerSignal[]): Promise<{
     resolved: number;
   };
 }> {
-  const docs = signals ?? (await loadAllSignals());
+  let docs = signals ?? (await loadAllSignals());
+
+  // Keep paper and live ledgers separate for the Trades tab
+  if (options?.paperMode === true) {
+    docs = docs.filter((d) => Boolean(d.paper));
+  } else if (options?.paperMode === false) {
+    docs = docs.filter((d) => !Boolean(d.paper));
+  }
+
+  docs = [...docs].sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+  );
+
+  const limit = options?.limit;
+  if (limit !== undefined && limit > 0) {
+    docs = docs.slice(0, limit);
+  }
+
   const prices = await priceMapFor(docs);
 
   const trades: BotTradeRow[] = docs.map((d) => {
@@ -241,8 +266,7 @@ export async function buildBotTradeRows(signals?: LedgerSignal[]): Promise<{
       entered: entered.length,
       skipped: trades.length - entered.length,
       totalPnl: entered.reduce((s, t) => s + (t.pnl ?? 0), 0),
-      // Only mark summary as paper when entered rows are paper (live mode keeps history)
-      paper: entered.length > 0 && entered.every((t) => t.paper),
+      paper: options?.paperMode === true,
       resolved: entered.filter((t) => t.resolved).length,
     },
   };
@@ -256,7 +280,7 @@ function keyFallback(d: LedgerSignal): string {
  * Shape paper/bot signals into the same payload My Trades charts already consume.
  */
 export async function buildPaperMyTradesResponse(): Promise<MyTradesResponse> {
-  const { trades, summary } = await buildBotTradeRows();
+  const { trades, summary } = await buildBotTradeRows(undefined, { paperMode: true });
   const entered = trades.filter((t) => t.entered);
 
   const allMyTrades: CopyTrade[] = entered.map((t) => ({

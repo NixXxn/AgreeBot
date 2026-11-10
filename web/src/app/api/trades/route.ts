@@ -3,19 +3,24 @@ import { buildBotTradeRows } from '@/lib/paperLedger';
 import { getRuntimeOverrides } from '@/lib/runtimeSettings';
 import { resolvePaperMode } from '@/lib/botMode';
 
+const TRADES_PAGE_LIMIT = 100;
+
 export async function GET() {
   try {
     const overrides = await getRuntimeOverrides().catch(() => ({}));
     const paperMode = resolvePaperMode(overrides);
-    const { trades, summary } = await buildBotTradeRows();
+    // Latest 100 of the active mode only — summary counts match the list
+    const { trades, summary } = await buildBotTradeRows(undefined, {
+      paperMode,
+      limit: TRADES_PAGE_LIMIT,
+    });
 
     return NextResponse.json({
       trades,
       summary: {
         ...summary,
-        // Bot mode badge: Coolify live switch, not historical paper rows
         paper: paperMode,
-        paperHistory: summary.paper,
+        limit: TRADES_PAGE_LIMIT,
       },
       paperMode,
       fetchedAt: new Date().toISOString(),
