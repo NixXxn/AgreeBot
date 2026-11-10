@@ -118,6 +118,70 @@ const syncCoolifyUserAddresses = async (): Promise<void> => {
     }
 };
 
+/**
+ * When Coolify PAPER_MODE / PREVIEW_MODE changes, adopt into Mongo so live/paper toggles stick.
+ */
+const syncCoolifyPaperMode = async (): Promise<void> => {
+    const raw =
+        process.env.PAPER_MODE !== undefined && process.env.PAPER_MODE !== ''
+            ? stripQuotes(process.env.PAPER_MODE)
+            : stripQuotes(process.env.PREVIEW_MODE || '');
+    const fp = fingerprintUserAddresses(`paper:${raw}`);
+    const paperOn = ['true', '1', 'yes', 'on'].includes(raw.toLowerCase());
+
+    try {
+        const doc = await RuntimeSettings.findById(RUNTIME_SETTINGS_ID).lean().exec();
+        const prevFp =
+            doc &&
+            typeof (doc as { coolifyPaperModeFp?: string }).coolifyPaperModeFp === 'string'
+                ? (doc as { coolifyPaperModeFp?: string }).coolifyPaperModeFp
+                : undefined;
+
+        if (prevFp === undefined) {
+            await RuntimeSettings.findByIdAndUpdate(
+                RUNTIME_SETTINGS_ID,
+                {
+                    $set: { coolifyPaperModeFp: fp, updatedAt: new Date() },
+                    $setOnInsert: { values: {} },
+                },
+                { upsert: true }
+            );
+            return;
+        }
+
+        if (prevFp === fp) return;
+
+        const existing =
+            doc?.values && typeof doc.values === 'object'
+                ? { ...(doc.values as Record<string, string>) }
+                : {};
+        existing.PAPER_MODE = paperOn ? 'true' : 'false';
+        existing.PREVIEW_MODE = existing.PAPER_MODE;
+
+        await RuntimeSettings.findByIdAndUpdate(
+            RUNTIME_SETTINGS_ID,
+            {
+                $set: {
+                    values: existing,
+                    coolifyPaperModeFp: fp,
+                    updatedAt: new Date(),
+                },
+            },
+            { upsert: true }
+        );
+
+        Logger.success(
+            `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`
+        );
+    } catch (error) {
+        Logger.warning(
+            `Could not sync Coolify PAPER_MODE: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
+};
+
 export const getRuntimeOverrides = async (): Promise<Record<string, string>> => {
     try {
         const doc = await RuntimeSettings.findById(RUNTIME_SETTINGS_ID).lean().exec();
@@ -141,6 +205,7 @@ export const getRuntimeOverrides = async (): Promise<Record<string, string>> => 
  */
 export const applyRuntimeOverrides = async (): Promise<void> => {
     await syncCoolifyUserAddresses();
+    await syncCoolifyPaperMode();
 
     const overrides = await getRuntimeOverrides();
     if (Object.keys(overrides).length === 0) {

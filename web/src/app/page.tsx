@@ -30,6 +30,14 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
+  const [authRequired, setAuthRequired] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => setAuthRequired(Boolean(d.authRequired)))
+      .catch(() => setAuthRequired(false));
+  }, []);
 
   const fetchTraders = async (refresh = false) => {
     try {
@@ -125,7 +133,7 @@ export default function Home() {
             </div>
 
             {/* Mode Toggle Buttons */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant={viewMode === 'traders' ? 'default' : 'outline'}
@@ -147,6 +155,18 @@ export default function Home() {
               >
                 Settings
               </Button>
+              {authRequired && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    await fetch('/api/auth/logout', { method: 'POST' });
+                    window.location.href = '/login';
+                  }}
+                >
+                  Log out
+                </Button>
+              )}
             </div>
           </div>
         </header>

@@ -9,6 +9,8 @@ export interface RuntimeSettingsDocument extends Document {
     values: Record<string, string>;
     /** SHA-256 of last-seen Coolify USER_ADDRESSES — used to detect env edits. */
     coolifyUserAddressesFp?: string;
+    /** SHA-256 of last-seen Coolify PAPER_MODE / PREVIEW_MODE. */
+    coolifyPaperModeFp?: string;
     updatedAt: Date;
 }
 
@@ -17,6 +19,7 @@ const runtimeSettingsSchema = new Schema(
         _id: { type: String, required: true },
         values: { type: Schema.Types.Mixed, default: {} },
         coolifyUserAddressesFp: { type: String, required: false },
+        coolifyPaperModeFp: { type: String, required: false },
         updatedAt: { type: Date, default: Date.now },
     },
     { collection: 'runtime_settings' }

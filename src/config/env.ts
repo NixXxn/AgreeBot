@@ -56,6 +56,22 @@ const normalizeEnvValues = (): void => {
 
 normalizeEnvValues();
 
+/**
+ * Polymarket deposit-wallet aliases (signature type 3 / POLY_1271).
+ * POLY_PRIVATE_KEY → PRIVATE_KEY, POLY_FUNDER → PROXY_WALLET when legacy keys empty.
+ */
+const applyPolymarketAliases = (): void => {
+    const polyKey = process.env.POLY_PRIVATE_KEY?.trim();
+    const polyFunder = process.env.POLY_FUNDER?.trim();
+    if ((!process.env.PRIVATE_KEY || !process.env.PRIVATE_KEY.trim()) && polyKey) {
+        process.env.PRIVATE_KEY = polyKey;
+    }
+    if ((!process.env.PROXY_WALLET || !process.env.PROXY_WALLET.trim()) && polyFunder) {
+        process.env.PROXY_WALLET = polyFunder;
+    }
+};
+applyPolymarketAliases();
+
 /** Paper / preview mode: monitor & simulate only — no wallet or live orders required */
 const isTruthyEnv = (value: string | undefined): boolean =>
     ['true', '1', 'yes', 'on'].includes((value || '').toLowerCase());
@@ -73,7 +89,7 @@ if (!process.env.CLOB_WS_URL) {
 if (!process.env.USDC_CONTRACT_ADDRESS) {
     process.env.USDC_CONTRACT_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 }
-if (PAPER_MODE_ENABLED && !process.env.RPC_URL) {
+if (!process.env.RPC_URL) {
     process.env.RPC_URL = 'https://polygon-rpc.com';
 }
 
@@ -395,6 +411,15 @@ export const ENV = {
     USER_ADDRESSES: parseUserAddresses(process.env.USER_ADDRESSES as string),
     PROXY_WALLET: (process.env.PROXY_WALLET || '') as string,
     PRIVATE_KEY: (process.env.PRIVATE_KEY || '') as string,
+    /**
+     * Polymarket signature type for CLOB orders:
+     * 0=EOA, 1=POLY_PROXY, 2=POLY_GNOSIS_SAFE, 3=POLY_1271 (deposit wallet).
+     * Empty = auto-detect (Safe vs EOA).
+     */
+    POLY_SIGNATURE_TYPE: (process.env.POLY_SIGNATURE_TYPE || '').trim(),
+    /** Relayer API key (gasless wallet ops; optional for CLOB if allowances already set). */
+    RELAYER_API_KEY: (process.env.RELAYER_API_KEY || '').trim(),
+    RELAYER_API_KEY_ADDRESS: (process.env.RELAYER_API_KEY_ADDRESS || '').trim(),
     CLOB_HTTP_URL: process.env.CLOB_HTTP_URL as string,
     CLOB_WS_URL: process.env.CLOB_WS_URL as string,
     /** Monitor/simulate only — wallet + private key optional */
