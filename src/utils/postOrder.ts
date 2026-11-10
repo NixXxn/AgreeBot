@@ -87,7 +87,7 @@ const postOrder = async (
     const UserActivity = getUserActivityModel(userAddress);
 
     // Paper / preview mode: log the signal and mark processed — never place orders
-    if (ENV.PAPER_MODE || !clobClient) {
+    if (ENV.PAPER_MODE) {
         const side = condition === 'sell' ? 'SELL' : 'BUY';
 
         // Never paper-SELL without a prior paper BUY on this asset
@@ -144,6 +144,16 @@ const postOrder = async (
         );
         await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
         return { executed: filled.sizeUsd > 0, sizeUsd: filled.sizeUsd, paper: true };
+    }
+
+    // Live mode without a CLOB client must NEVER fall through to paper fills
+    if (!clobClient) {
+        Logger.error(
+            `[LIVE] Skip ${condition.toUpperCase()} — CLOB client not ready ` +
+                `(paper mode is OFF). Restart bot or wait for client init.`
+        );
+        await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+        return { executed: false, sizeUsd: 0, paper: false };
     }
 
     //Merge strategy

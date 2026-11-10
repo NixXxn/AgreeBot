@@ -137,24 +137,23 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
                 ? (doc as { coolifyPaperModeFp?: string }).coolifyPaperModeFp
                 : undefined;
 
-        if (prevFp === undefined) {
-            await RuntimeSettings.findByIdAndUpdate(
-                RUNTIME_SETTINGS_ID,
-                {
-                    $set: { coolifyPaperModeFp: fp, updatedAt: new Date() },
-                    $setOnInsert: { values: {} },
-                },
-                { upsert: true }
-            );
-            return;
-        }
-
-        if (prevFp === fp) return;
-
         const existing =
             doc?.values && typeof doc.values === 'object'
                 ? { ...(doc.values as Record<string, string>) }
                 : {};
+
+        // First baseline OR Coolify flipped: write Coolify paper/live into Mongo.
+        // Also clear stale Mongo paper=true whenever Coolify explicitly says live.
+        const mongoPaperOn =
+            existing.PAPER_MODE === 'true' || existing.PREVIEW_MODE === 'true';
+        const coolifySaysLive = !paperOn && raw !== '';
+        const needsAdopt =
+            prevFp === undefined ||
+            prevFp !== fp ||
+            (coolifySaysLive && mongoPaperOn);
+
+        if (!needsAdopt) return;
+
         existing.PAPER_MODE = paperOn ? 'true' : 'false';
         existing.PREVIEW_MODE = existing.PAPER_MODE;
 
@@ -166,13 +165,18 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
                     coolifyPaperModeFp: fp,
                     updatedAt: new Date(),
                 },
+                $setOnInsert: {},
             },
             { upsert: true }
         );
 
-        Logger.success(
-            `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`
-        );
+        if (prevFp !== undefined && prevFp !== fp) {
+            Logger.success(
+                `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`
+            );
+        } else if (coolifySaysLive && mongoPaperOn) {
+            Logger.success('Cleared stale Mongo paper mode — Coolify is live');
+        }
     } catch (error) {
         Logger.warning(
             `Could not sync Coolify PAPER_MODE: ${

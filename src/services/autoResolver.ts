@@ -418,7 +418,7 @@ const checkAndResolvePositions = async (clobClient: ClobClient): Promise<void> =
     Logger.separator();
 };
 
-const autoResolver = async (clobClient: ClobClient) => {
+const autoResolver = async () => {
     if (!AUTO_RESOLVE_ENABLED) {
         Logger.info('Auto resolver is disabled');
         return;
@@ -430,7 +430,16 @@ const autoResolver = async (clobClient: ClobClient) => {
 
     while (isRunning) {
         try {
-            await checkAndResolvePositions(clobClient);
+            const { ENV } = await import('../config/env');
+            if (ENV.PAPER_MODE) {
+                // Live-only; wait until mode flips
+            } else {
+                const { ensureClobClient } = await import('./clobClientHolder');
+                const clobClient = await ensureClobClient();
+                if (clobClient) {
+                    await checkAndResolvePositions(clobClient);
+                }
+            }
         } catch (error) {
             Logger.error(`Auto resolver error: ${error}`);
         }

@@ -15,6 +15,7 @@ import {
     getConsensusBufferSize,
 } from './consensus';
 import { recordBotSignal } from './botSignals';
+import { ensureClobClient } from './clobClientHolder';
 
 const PROXY_WALLET = ENV.PROXY_WALLET;
 const TRADE_AGGREGATION_MIN_TOTAL_USD = 1.0; // Polymarket minimum
@@ -427,7 +428,7 @@ export const stopTradeExecutor = () => {
     Logger.info('Trade executor shutdown requested...');
 };
 
-const tradeExecutor = async (clobClient: ClobClient | null) => {
+const tradeExecutor = async (_initialClient?: ClobClient | null) => {
     Logger.success(`Trade executor ready for ${getUserAddresses().length} trader(s)`);
     if (ENV.PAPER_MODE) {
         Logger.warning('PAPER MODE — signals logged only, no live orders');
@@ -445,7 +446,17 @@ const tradeExecutor = async (clobClient: ClobClient | null) => {
     }
 
     let lastCheck = Date.now();
+    let lastModeWasPaper = ENV.PAPER_MODE;
     while (isRunning) {
+        // Recreate CLOB client when Settings flips paper → live without restart
+        if (ENV.PAPER_MODE !== lastModeWasPaper) {
+            Logger.info(
+                `Trading mode changed → ${ENV.PAPER_MODE ? 'paper' : 'live'}; refreshing CLOB client`
+            );
+            lastModeWasPaper = ENV.PAPER_MODE;
+        }
+        const clobClient = await ensureClobClient();
+
         const trades = await readTempTrades();
 
         // --- Consensus path ---

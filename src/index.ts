@@ -1,13 +1,12 @@
 import connectDB, { closeDB } from './config/db';
 import { ENV } from './config/env';
-import createClobClient from './utils/createClobClient';
 import tradeExecutor, { stopTradeExecutor } from './services/tradeExecutor';
 import tradeMonitor, { stopTradeMonitor } from './services/tradeMonitor';
 import autoResolver, { stopAutoResolver } from './services/autoResolver';
 import { startHealthServer, stopHealthServer } from './services/healthServer';
+import { ensureClobClient, getClobClient } from './services/clobClientHolder';
 import Logger from './utils/logger';
 import { performHealthCheck, logHealthCheck } from './utils/healthCheck';
-import { ClobClient } from '@polymarket/clob-client';
 
 const PROXY_WALLET = ENV.PROXY_WALLET;
 
@@ -107,38 +106,33 @@ export const main = async () => {
             await loadPaperPositionsFromDb();
         }
 
-        let clobClient: ClobClient | null = null;
-        if (ENV.PAPER_MODE) {
-            Logger.info('Skipping CLOB client (paper mode — no private key required)');
-        } else {
-            Logger.info('Initializing CLOB client...');
-            clobClient = await createClobClient();
-            Logger.success('CLOB client ready');
-        }
+        await ensureClobClient();
 
         Logger.separator();
         Logger.info('Starting trade monitor...');
         tradeMonitor();
 
         Logger.info('Starting trade executor...');
-        tradeExecutor(clobClient);
+        tradeExecutor(getClobClient());
 
-        if (!ENV.PAPER_MODE && ENV.AUTO_RESOLVE_ENABLED && clobClient) {
+        if (ENV.AUTO_RESOLVE_ENABLED) {
             Logger.info('Starting auto resolver...');
-            autoResolver(clobClient);
-        } else if (ENV.PAPER_MODE) {
-            Logger.info('Auto resolver skipped (paper mode)');
+            autoResolver();
+        } else {
+            Logger.info('Auto resolver disabled');
         }
 
         // Pick up dashboard Settings changes even if the save-time notify missed
         setInterval(() => {
-            applyRuntimeOverrides().catch((error) => {
-                Logger.warning(
-                    `Periodic runtime reload failed: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`
-                );
-            });
+            applyRuntimeOverrides()
+                .then(() => ensureClobClient())
+                .catch((error) => {
+                    Logger.warning(
+                        `Periodic runtime reload failed: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    );
+                });
         }, 30_000);
     } catch (error) {
         Logger.error(`Fatal error during startup: ${error}`);

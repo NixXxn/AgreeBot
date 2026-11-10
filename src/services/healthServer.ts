@@ -101,9 +101,11 @@ export const startHealthServer = (): void => {
         if (url === '/runtime/reload' && method === 'POST') {
             try {
                 const { applyRuntimeOverrides } = await import('./runtimeSettings');
+                const { ensureClobClient, getClobClient } = await import('./clobClientHolder');
                 await applyRuntimeOverrides();
+                await ensureClobClient();
                 Logger.success(
-                    `Runtime settings reloaded (minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length})`
+                    `Runtime settings reloaded (minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length}, paper=${ENV.PAPER_MODE}, clob=${!!getClobClient()})`
                 );
                 json(res, 200, {
                     ok: true,
@@ -116,6 +118,7 @@ export const startHealthServer = (): void => {
                         sizeMode: ENV.CONSENSUS_SIZE_MODE,
                     },
                     paperMode: ENV.PAPER_MODE,
+                    clobReady: !!getClobClient(),
                 });
             } catch (error) {
                 json(res, 500, {
