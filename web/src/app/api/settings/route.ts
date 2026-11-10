@@ -21,19 +21,23 @@ async function notifyBotRuntimeReload(): Promise<{
   ok: boolean;
   message: string;
   minAgreement?: number;
+  paperMode?: boolean;
+  clobReady?: boolean;
 }> {
   const healthPort = process.env.HEALTH_PORT || '3001';
   try {
     const res = await fetch(`http://127.0.0.1:${healthPort}/runtime/reload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(15000),
     });
     const body = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
       error?: string;
       consensus?: { minAgreement?: number };
       traders?: number;
+      paperMode?: boolean;
+      clobReady?: boolean;
     };
     if (!res.ok || body.ok === false) {
       return {
@@ -44,7 +48,9 @@ async function notifyBotRuntimeReload(): Promise<{
     return {
       ok: true,
       minAgreement: body.consensus?.minAgreement,
-      message: `Bot reloaded (minAgreement=${body.consensus?.minAgreement ?? '?'}, traders=${body.traders ?? '?'})`,
+      paperMode: body.paperMode,
+      clobReady: body.clobReady,
+      message: `Bot reloaded (mode=${body.paperMode ? 'paper' : 'live'}, clob=${body.clobReady ? 'ready' : 'no'}, minAgreement=${body.consensus?.minAgreement ?? '?'}, traders=${body.traders ?? '?'})`,
     };
   } catch (error) {
     return {
@@ -412,19 +418,26 @@ async function buildEnvView(): Promise<Record<string, string>> {
   );
   env = await getMergedEnv(env, { required: mongoConfigured });
 
-  // Polymarket aliases + Coolify live switch (PAPER_MODE=false beats stale Mongo paper=true)
+  // Polymarket aliases — wallet from POLY_FUNDER when PROXY_WALLET empty
   if (!stripQuotes(env.PROXY_WALLET || '') && stripQuotes(env.POLY_FUNDER || '')) {
     env.PROXY_WALLET = stripQuotes(env.POLY_FUNDER);
   }
   if (!stripQuotes(env.PRIVATE_KEY || '') && stripQuotes(env.POLY_PRIVATE_KEY || '')) {
     env.PRIVATE_KEY = stripQuotes(env.POLY_PRIVATE_KEY);
   }
-  const coolifyPaper =
-    stripQuotes(process.env.PAPER_MODE || '') ||
-    stripQuotes(process.env.PREVIEW_MODE || '');
-  if (['false', '0', 'no', 'off'].includes(coolifyPaper.toLowerCase())) {
-    env.PAPER_MODE = 'false';
-    env.PREVIEW_MODE = 'false';
+
+  // Prefer the running bot's mode so Settings matches what actually trades
+  try {
+    const { fetchBotHealthMode } = await import('@/lib/botMode');
+    const botMode = await fetchBotHealthMode();
+    if (botMode) {
+      env.PAPER_MODE = botMode.paperMode ? 'true' : 'false';
+      env.PREVIEW_MODE = env.PAPER_MODE;
+      env.BOT_MODE_SOURCE = botMode.source;
+      env.BOT_CLOB_READY = botMode.clobReady ? 'true' : 'false';
+    }
+  } catch {
+    /* bot unreachable — keep Mongo/env merge */
   }
 
   return env;
@@ -539,14 +552,18 @@ export async function PUT(request: Request) {
 
     const botReload = await notifyBotRuntimeReload();
 
+    // Re-read after bot reload so previewMode matches the process that trades
+    const envAfter = await buildEnvView();
+    const settingsAfter = envToSettings(envAfter);
+
     return NextResponse.json({
       success: true,
-      settings,
+      settings: settingsAfter,
       traderLabels,
       overrides: await getRuntimeOverrides().catch(() => ({})),
       botReload,
       message: botReload.ok
-        ? `Settings saved. ${botReload.message}`
+        ? `Settings saved. ${botReload.message} · mode=${settingsAfter.botSettings.previewMode ? 'paper' : 'live'}`
         : `Settings saved to MongoDB. ${botReload.message}`,
     });
   } catch (error) {

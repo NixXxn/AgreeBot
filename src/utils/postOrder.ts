@@ -88,6 +88,9 @@ const postOrder = async (
 
     // Paper / preview mode: log the signal and mark processed — never place orders
     if (ENV.PAPER_MODE) {
+        Logger.warning(
+            `[PAPER] ENV.PAPER_MODE=true — simulating ${condition.toUpperCase()} (not a live order)`
+        );
         const side = condition === 'sell' ? 'SELL' : 'BUY';
 
         // Never paper-SELL without a prior paper BUY on this asset

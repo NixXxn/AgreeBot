@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
 import { buildBotTradeRows } from '@/lib/paperLedger';
 import { getRuntimeOverrides } from '@/lib/runtimeSettings';
-import { resolvePaperMode } from '@/lib/botMode';
+import { resolvePaperModeAsync } from '@/lib/botMode';
 
 const TRADES_PAGE_LIMIT = 100;
 
 export async function GET() {
   try {
     const overrides = await getRuntimeOverrides().catch(() => ({}));
-    const paperMode = resolvePaperMode(overrides);
+    const mode = await resolvePaperModeAsync(overrides);
     // Latest 100 of the active mode only — summary counts match the list
     const { trades, summary } = await buildBotTradeRows(undefined, {
-      paperMode,
+      paperMode: mode.paperMode,
       limit: TRADES_PAGE_LIMIT,
     });
 
@@ -19,10 +19,12 @@ export async function GET() {
       trades,
       summary: {
         ...summary,
-        paper: paperMode,
+        paper: mode.paperMode,
         limit: TRADES_PAGE_LIMIT,
       },
-      paperMode,
+      paperMode: mode.paperMode,
+      modeSource: mode.source,
+      clobReady: mode.clobReady ?? null,
       fetchedAt: new Date().toISOString(),
     });
   } catch (error) {

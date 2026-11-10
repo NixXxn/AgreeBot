@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import * as fs from 'fs';
-import * as path from 'path';
-import { buildPaperMyTradesResponse } from '@/lib/paperLedger';
+import { buildBotTradeRows, buildPaperMyTradesResponse } from '@/lib/paperLedger';
 import { getRuntimeOverrides } from '@/lib/runtimeSettings';
-import { resolvePaperMode, resolveProxyWallet } from '@/lib/botMode';
+import { resolvePaperModeAsync, resolveProxyWallet } from '@/lib/botMode';
 import { buildByTraderStats, summarizeCopyTrades } from '@/lib/copyTradeStats';
 import type { CopyTrade, MyTradesResponse } from '@/types/myTrades';
 
@@ -13,64 +11,81 @@ export async function GET(request: Request) {
 
   try {
     const overrides = await getRuntimeOverrides().catch(() => ({}));
-    const paperMode = resolvePaperMode(overrides);
+    const mode = await resolvePaperModeAsync(overrides);
+    const paperMode = mode.paperMode;
     const wallet = resolveProxyWallet(overrides);
 
     // Paper mode: accumulate from Mongo + JSONL ledger
     if (paperMode) {
       const paper = await buildPaperMyTradesResponse();
-      return NextResponse.json(paper);
+      return NextResponse.json({
+        ...paper,
+        modeSource: mode.source,
+      });
     }
 
-    // Live mode: prefer Data API for the funder wallet (no local analyze reports required)
-    if (wallet) {
-      const reportsDir = path.join(process.cwd(), '..', 'trader_reports');
-      const myTradesPath = path.join(reportsDir, '_MY_TRADES.json');
-
-      if (fs.existsSync(myTradesPath) && !refresh) {
-        try {
-          const data = JSON.parse(fs.readFileSync(myTradesPath, 'utf-8'));
-          if (data?.myWallet && !data.paperMode) {
-            return NextResponse.json({
-              ...data,
-              cached: true,
-              cacheDate: data.analysisDate,
-            });
-          }
-        } catch {
-          /* rebuild */
-        }
-      }
-
-      const live = await buildLiveWalletMyTrades(wallet);
+    // Live mode: prefer bot's own live signals (what the copy bot actually did).
+    // Optionally enrich with Data API wallet positions; never 500 if Data API fails.
+    const liveFromBot = await buildLiveFromBotSignals(wallet);
+    if (!refresh) {
       try {
-        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
-        fs.writeFileSync(myTradesPath, JSON.stringify(live, null, 2));
-      } catch {
-        /* cache optional */
+        const enriched = await enrichWithDataApi(liveFromBot, wallet);
+        return NextResponse.json({
+          ...enriched,
+          modeSource: mode.source,
+          clobReady: mode.clobReady ?? null,
+        });
+      } catch (error) {
+        console.warn('Data API enrich failed, returning bot signals only:', error);
+        return NextResponse.json({
+          ...liveFromBot,
+          modeSource: mode.source,
+          clobReady: mode.clobReady ?? null,
+          message:
+            (liveFromBot.message || '') +
+            ' (Data API unavailable — showing bot live signals only)',
+        });
       }
-      return NextResponse.json(live);
     }
 
-    // No wallet — fall back to any paper ledger history
-    const paper = await buildPaperMyTradesResponse();
-    if (paper.summary.totalTrades > 0) {
-      return NextResponse.json(paper);
+    try {
+      const enriched = await enrichWithDataApi(liveFromBot, wallet);
+      return NextResponse.json({
+        ...enriched,
+        modeSource: mode.source,
+        clobReady: mode.clobReady ?? null,
+      });
+    } catch (error) {
+      console.warn('Data API refresh failed:', error);
+      return NextResponse.json({
+        ...liveFromBot,
+        modeSource: mode.source,
+        clobReady: mode.clobReady ?? null,
+        message:
+          (liveFromBot.message || '') +
+          ' (Data API unavailable — showing bot live signals only)',
+      });
     }
-
-    return NextResponse.json(
-      {
-        error:
-          'No POLY_FUNDER / PROXY_WALLET configured. Set the deposit wallet in Coolify for live My Trades.',
-      },
-      { status: 404 }
-    );
   } catch (error) {
     console.error('Error fetching my trades:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch my trades' },
-      { status: 500 }
-    );
+    // Last resort: paper ledger so the tab still loads
+    try {
+      const paper = await buildPaperMyTradesResponse();
+      return NextResponse.json({
+        ...paper,
+        error:
+          error instanceof Error ? error.message : 'Failed to fetch my trades',
+        message: 'Fell back to paper ledger after live fetch error',
+      });
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error ? error.message : 'Failed to fetch my trades',
+        },
+        { status: 500 }
+      );
+    }
   }
 }
 
@@ -86,10 +101,31 @@ function unwrapData(payload: unknown): Record<string, unknown>[] {
   return [];
 }
 
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(20000),
+  });
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(`Bad JSON from ${url} (${response.status})`);
+  }
+  if (!response.ok) {
+    const errMsg =
+      payload && typeof payload === 'object' && 'error' in payload
+        ? String((payload as { error: unknown }).error)
+        : `HTTP ${response.status}`;
+    throw new Error(`Data API error: ${errMsg}`);
+  }
+  return payload;
+}
+
 async function fetchPositions(address: string) {
   const url = `https://data-api.polymarket.com/v2/positions?user=${address}&limit=500`;
-  const response = await fetch(url, { cache: 'no-store' });
-  const payload = await response.json();
+  const payload = await fetchJson(url);
   return unwrapData(payload).map((row) => ({
     asset: String(row.token_id ?? row.asset ?? ''),
     conditionId: String(row.condition_id ?? row.conditionId ?? ''),
@@ -106,74 +142,75 @@ async function fetchPositions(address: string) {
   }));
 }
 
-async function fetchTrades(address: string) {
-  const allTrades: CopyTrade[] = [];
-  let cursor: string | null = null;
+async function buildLiveFromBotSignals(wallet: string): Promise<MyTradesResponse> {
+  const { trades, summary } = await buildBotTradeRows(undefined, {
+    paperMode: false,
+    limit: 500,
+  });
+  const entered = trades.filter((t) => t.entered);
 
-  for (let page = 0; page < 10; page++) {
-    const params = new URLSearchParams({
-      user: address,
-      type: 'TRADE',
-      limit: '200',
-    });
-    if (cursor) params.set('cursor', cursor);
-
-    const url = `https://data-api.polymarket.com/v2/activity?${params.toString()}`;
-    const response = await fetch(url, { cache: 'no-store' });
-    const payload = await response.json();
-    const rows = unwrapData(payload);
-    if (rows.length === 0) break;
-
-    for (const row of rows) {
-      const sideRaw = String(row.side ?? 'BUY').toUpperCase();
-      allTrades.push({
-        timestamp: Number(row.timestamp ?? 0),
-        side: sideRaw === 'SELL' ? 'SELL' : 'BUY',
-        usdcSize: Number(row.usdc_size ?? row.usdcSize ?? 0),
-        price: Number(row.price ?? 0),
-        title: String(row.title ?? ''),
-        outcome: String(row.outcome ?? ''),
-        conditionId: String(row.condition_id ?? row.conditionId ?? ''),
-        asset: String(row.token_id ?? row.asset ?? ''),
-        matchedTrader: null,
-        matchedTraderLabel: null,
-        timeDiff: null,
-        paper: false,
-        resolved: false,
-      });
-    }
-
-    const next =
-      payload && typeof payload === 'object'
-        ? (payload as { pagination?: { next_cursor?: string | null; has_more?: boolean } })
-            .pagination
-        : undefined;
-    if (!next?.has_more || !next.next_cursor) break;
-    cursor = next.next_cursor;
-  }
-
-  return allTrades;
-}
-
-async function buildLiveWalletMyTrades(wallet: string): Promise<MyTradesResponse> {
-  const [allMyTrades, myPositions] = await Promise.all([
-    fetchTrades(wallet),
-    fetchPositions(wallet),
-  ]);
-
-  const totalUnrealizedPnL = myPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
-  const totalRealizedPnL = myPositions.reduce((sum, p) => sum + (p.realizedPnl || 0), 0);
+  const allMyTrades: CopyTrade[] = entered.map((t) => ({
+    timestamp: t.createdAt,
+    side: t.side,
+    usdcSize: t.sizeUsd,
+    price: t.entryPrice,
+    title: t.title,
+    outcome: t.outcome,
+    conditionId: t.conditionId,
+    asset: t.asset,
+    matchedTrader: t.agreeingTraders[0] || null,
+    matchedTraderLabel:
+      t.agreeingTraders.length > 0
+        ? t.agreeingTraders.map((a) => `0x…${a.slice(-4)}`).join(', ')
+        : null,
+    timeDiff: null,
+    paper: false,
+    resolved: t.resolved,
+    pnl: t.pnl,
+  }));
 
   const byTrader = buildByTraderStats(allMyTrades, [], { paperMode: false });
   const flow = summarizeCopyTrades(allMyTrades, { paperMode: false });
 
   return {
     analysisDate: new Date().toISOString(),
-    myWallet: wallet,
+    myWallet: wallet || '',
     paperMode: false,
     traders: [],
     allMyTrades,
     byTrader,
+    positions: {
+      total: 0,
+      totalValue: 0,
+      unrealizedPnL: 0,
+      realizedPnL: 0,
+      totalPnL: flow.pnl,
+    },
+    summary: {
+      totalTrades: allMyTrades.length,
+      totalBought: flow.totalBought,
+      totalSold: flow.totalSold,
+      matchedTrades: allMyTrades.filter((t) => t.matchedTrader).length,
+      unmatchedTrades: allMyTrades.filter((t) => !t.matchedTrader).length,
+    },
+    message: wallet
+      ? `Live bot signals (${allMyTrades.length} entered) for ${wallet.slice(0, 8)}…`
+      : `Live bot signals (${allMyTrades.length} entered) — set POLY_FUNDER for wallet positions`,
+  };
+}
+
+async function enrichWithDataApi(
+  base: MyTradesResponse,
+  wallet: string
+): Promise<MyTradesResponse> {
+  if (!wallet) return base;
+
+  const myPositions = await fetchPositions(wallet);
+  const totalUnrealizedPnL = myPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
+  const totalRealizedPnL = myPositions.reduce((sum, p) => sum + (p.realizedPnl || 0), 0);
+
+  return {
+    ...base,
     positions: {
       total: myPositions.length,
       totalValue: myPositions.reduce((s, p) => s + (p.currentValue || 0), 0),
@@ -181,13 +218,6 @@ async function buildLiveWalletMyTrades(wallet: string): Promise<MyTradesResponse
       realizedPnL: totalRealizedPnL,
       totalPnL: totalUnrealizedPnL + totalRealizedPnL,
     },
-    summary: {
-      totalTrades: allMyTrades.length,
-      totalBought: flow.totalBought,
-      totalSold: flow.totalSold,
-      matchedTrades: 0,
-      unmatchedTrades: allMyTrades.length,
-    },
-    message: `Live wallet ${wallet.slice(0, 8)}… · ${allMyTrades.length} trades from Data API v2`,
+    message: `${base.message || ''} · ${myPositions.length} open positions from Data API`,
   };
 }

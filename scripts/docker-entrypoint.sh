@@ -26,6 +26,8 @@ strip_q() {
 
 PAPER_MODE="$(strip_q "${PAPER_MODE:-false}")"
 PREVIEW_MODE="$(strip_q "${PREVIEW_MODE:-false}")"
+# Keep shell exports in sync — dotenv must not be the only source of these
+export PAPER_MODE PREVIEW_MODE
 PAPER_BALANCE_USD="$(strip_q "${PAPER_BALANCE_USD:-10000}")"
 USER_ADDRESSES="$(strip_q "${USER_ADDRESSES:-}")"
 PROXY_WALLET="$(strip_q "${PROXY_WALLET:-}")"

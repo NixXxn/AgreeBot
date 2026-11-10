@@ -28,9 +28,12 @@ export const startHealthServer = (): void => {
         const method = (req.method || 'GET').toUpperCase();
 
         if (url === '/health' || url === '/healthz' || url === '/') {
+            const { getClobClient } = await import('./clobClientHolder');
             json(res, 200, {
                 status: 'ok',
                 mode: ENV.PAPER_MODE ? 'paper' : 'live',
+                paperMode: ENV.PAPER_MODE,
+                clobReady: !!getClobClient(),
                 uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
                 traders: ENV.USER_ADDRESSES.length,
                 paperOpenPositions: getOpenPaperPositionCount(),

@@ -119,13 +119,20 @@ const syncCoolifyUserAddresses = async (): Promise<void> => {
 };
 
 /**
+ * Frozen at module load (container start) — Coolify/entrypoint value before Mongo
+ * overrides mutate process.env.PAPER_MODE.
+ */
+const BOOT_PAPER_MODE_RAW = stripQuotes(
+    process.env.PAPER_MODE !== undefined && process.env.PAPER_MODE !== ''
+        ? process.env.PAPER_MODE
+        : process.env.PREVIEW_MODE || ''
+);
+
+/**
  * When Coolify PAPER_MODE / PREVIEW_MODE changes, adopt into Mongo so live/paper toggles stick.
  */
 const syncCoolifyPaperMode = async (): Promise<void> => {
-    const raw =
-        process.env.PAPER_MODE !== undefined && process.env.PAPER_MODE !== ''
-            ? stripQuotes(process.env.PAPER_MODE)
-            : stripQuotes(process.env.PREVIEW_MODE || '');
+    const raw = BOOT_PAPER_MODE_RAW;
     const fp = fingerprintUserAddresses(`paper:${raw}`);
     const paperOn = ['true', '1', 'yes', 'on'].includes(raw.toLowerCase());
 
@@ -142,17 +149,29 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
                 ? { ...(doc.values as Record<string, string>) }
                 : {};
 
-        // First baseline OR Coolify flipped: write Coolify paper/live into Mongo.
-        // Also clear stale Mongo paper=true whenever Coolify explicitly says live.
-        const mongoPaperOn =
-            existing.PAPER_MODE === 'true' || existing.PREVIEW_MODE === 'true';
-        const coolifySaysLive = !paperOn && raw !== '';
-        const needsAdopt =
-            prevFp === undefined ||
-            prevFp !== fp ||
-            (coolifySaysLive && mongoPaperOn);
+        // Baseline fingerprint on first boot. Only overwrite Mongo when Coolify itself changes —
+        // dashboard Settings owns paper/live after that.
+        if (prevFp === undefined) {
+            if (raw !== '' && existing.PAPER_MODE === undefined && existing.PREVIEW_MODE === undefined) {
+                existing.PAPER_MODE = paperOn ? 'true' : 'false';
+                existing.PREVIEW_MODE = existing.PAPER_MODE;
+            }
+            await RuntimeSettings.findByIdAndUpdate(
+                RUNTIME_SETTINGS_ID,
+                {
+                    $set: {
+                        ...(Object.keys(existing).length > 0 ? { values: existing } : {}),
+                        coolifyPaperModeFp: fp,
+                        updatedAt: new Date(),
+                    },
+                    $setOnInsert: { values: existing },
+                },
+                { upsert: true }
+            );
+            return;
+        }
 
-        if (!needsAdopt) return;
+        if (prevFp === fp) return;
 
         existing.PAPER_MODE = paperOn ? 'true' : 'false';
         existing.PREVIEW_MODE = existing.PAPER_MODE;
@@ -165,18 +184,13 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
                     coolifyPaperModeFp: fp,
                     updatedAt: new Date(),
                 },
-                $setOnInsert: {},
             },
             { upsert: true }
         );
 
-        if (prevFp !== undefined && prevFp !== fp) {
-            Logger.success(
-                `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`
-            );
-        } else if (coolifySaysLive && mongoPaperOn) {
-            Logger.success('Cleared stale Mongo paper mode — Coolify is live');
-        }
+        Logger.success(
+            `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`
+        );
     } catch (error) {
         Logger.warning(
             `Could not sync Coolify PAPER_MODE: ${
@@ -207,11 +221,52 @@ export const getRuntimeOverrides = async (): Promise<Record<string, string>> => 
  * Apply Mongo dashboard overrides on top of Coolify/process env.
  * Mutates ENV.USER_ADDRESSES in place so existing module refs stay valid.
  */
+const isTruthy = (value: string | undefined): boolean =>
+    ['true', '1', 'yes', 'on'].includes((value || '').trim().toLowerCase());
+
+const isFalsy = (value: string | undefined): boolean =>
+    ['false', '0', 'no', 'off'].includes((value || '').trim().toLowerCase());
+
+/**
+ * Dashboard Mongo Settings owns paper/live. Keep process.env in sync so later
+ * reads (and child logic) see the same mode the bot is actually using.
+ */
+const applyPaperModeOverride = (overrides: Record<string, string>): void => {
+    const before = ENV.PAPER_MODE;
+    const mongoRaw = overrides.PAPER_MODE ?? overrides.PREVIEW_MODE;
+
+    if (mongoRaw !== undefined) {
+        if (isFalsy(mongoRaw)) {
+            ENV.PAPER_MODE = false;
+        } else if (isTruthy(mongoRaw)) {
+            ENV.PAPER_MODE = true;
+        }
+    } else {
+        const envRaw = process.env.PAPER_MODE || process.env.PREVIEW_MODE || '';
+        if (isFalsy(envRaw)) ENV.PAPER_MODE = false;
+        else if (isTruthy(envRaw)) ENV.PAPER_MODE = true;
+    }
+
+    ENV.PREVIEW_MODE = ENV.PAPER_MODE;
+    process.env.PAPER_MODE = ENV.PAPER_MODE ? 'true' : 'false';
+    process.env.PREVIEW_MODE = process.env.PAPER_MODE;
+
+    if (before !== ENV.PAPER_MODE) {
+        Logger.success(
+            `Trading mode → ${ENV.PAPER_MODE ? 'PAPER' : 'LIVE'} (Mongo Settings)`
+        );
+    }
+};
+
 export const applyRuntimeOverrides = async (): Promise<void> => {
     await syncCoolifyUserAddresses();
     await syncCoolifyPaperMode();
 
     const overrides = await getRuntimeOverrides();
+
+    // Always resolve paper/live — even when Mongo has no other overrides
+    applyPaperModeOverride(overrides);
+
     if (Object.keys(overrides).length === 0) {
         Logger.info('No dashboard runtime overrides in Mongo');
         return;
@@ -232,20 +287,6 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     }
     if (overrides.TRADE_AGGREGATION_ENABLED !== undefined) {
         ENV.TRADE_AGGREGATION_ENABLED = overrides.TRADE_AGGREGATION_ENABLED === 'true';
-    }
-    // Coolify PAPER_MODE=false must win over a stale Mongo paper=true override
-    const coolifyPaperRaw = (process.env.PAPER_MODE || process.env.PREVIEW_MODE || '')
-        .trim()
-        .toLowerCase();
-    if (['false', '0', 'no', 'off'].includes(coolifyPaperRaw)) {
-        ENV.PAPER_MODE = false;
-        ENV.PREVIEW_MODE = false;
-    } else if (overrides.PAPER_MODE !== undefined) {
-        ENV.PAPER_MODE = overrides.PAPER_MODE === 'true';
-        ENV.PREVIEW_MODE = ENV.PAPER_MODE;
-    } else if (overrides.PREVIEW_MODE !== undefined) {
-        ENV.PREVIEW_MODE = overrides.PREVIEW_MODE === 'true';
-        ENV.PAPER_MODE = ENV.PREVIEW_MODE;
     }
     if (overrides.AUTO_RESOLVE_ENABLED !== undefined) {
         ENV.AUTO_RESOLVE_ENABLED = overrides.AUTO_RESOLVE_ENABLED === 'true';
