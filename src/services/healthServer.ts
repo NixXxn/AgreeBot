@@ -76,6 +76,27 @@ export const startHealthServer = (): void => {
             return;
         }
 
+        // Dashboard Settings / health — CLOB collateral (not wallet ERC-20)
+        if (url === '/balance' && method === 'GET') {
+            try {
+                const getMyBalance = (await import('../utils/getMyBalance')).default;
+                const usdc = await getMyBalance(ENV.PROXY_WALLET);
+                json(res, 200, {
+                    ok: true,
+                    usdc,
+                    proxyWallet: ENV.PROXY_WALLET,
+                    source: 'clob',
+                    paperMode: ENV.PAPER_MODE,
+                });
+            } catch (error) {
+                json(res, 500, {
+                    ok: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+            return;
+        }
+
         // Dashboard Settings save → re-apply Mongo overrides without container restart
         if (url === '/runtime/reload' && method === 'POST') {
             try {

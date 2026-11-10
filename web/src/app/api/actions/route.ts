@@ -46,6 +46,8 @@ function getEnv(key: string, overrides: Record<string, string>): string {
 }
 
 function isPaperMode(overrides: Record<string, string>): boolean {
+  const envRaw = (process.env.PAPER_MODE || process.env.PREVIEW_MODE || '').trim();
+  if (['false', '0', 'no', 'off'].includes(envRaw.toLowerCase())) return false;
   return (
     getEnv('PAPER_MODE', overrides) === 'true' ||
     getEnv('PREVIEW_MODE', overrides) === 'true'
@@ -53,8 +55,12 @@ function isPaperMode(overrides: Record<string, string>): boolean {
 }
 
 function hasLiveWallet(overrides: Record<string, string>): boolean {
-  const wallet = getEnv('PROXY_WALLET', overrides).replace(/^['"]|['"]$/g, '');
-  const key = getEnv('PRIVATE_KEY', overrides).replace(/^['"]|['"]$/g, '');
+  const wallet = (
+    getEnv('PROXY_WALLET', overrides) || getEnv('POLY_FUNDER', overrides)
+  ).replace(/^['"]|['"]$/g, '');
+  const key = (
+    getEnv('PRIVATE_KEY', overrides) || getEnv('POLY_PRIVATE_KEY', overrides)
+  ).replace(/^['"]|['"]$/g, '');
   if (!wallet || wallet === "''" || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) return false;
   if (!key || key.includes('your_private_key') || key.length < 32) return false;
   return true;

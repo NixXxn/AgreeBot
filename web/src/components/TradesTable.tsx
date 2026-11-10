@@ -84,7 +84,11 @@ export function TradesTable() {
           <div>
             <CardTitle className="flex items-center gap-3">
               Trades
-              {summary?.paper && <Badge variant="warning">Paper</Badge>}
+              {summary?.paper ? (
+                <Badge variant="warning">Paper</Badge>
+              ) : (
+                <Badge variant="success">Live</Badge>
+              )}
             </CardTitle>
             {summary && (
               <p className="text-sm text-muted-foreground mt-1">

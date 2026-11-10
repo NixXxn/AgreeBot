@@ -130,7 +130,11 @@ function envToSettings(env: Record<string, string>): BotSettings {
       retryLimit: parseInt(env.RETRY_LIMIT || '3', 10),
       tradeAggregationEnabled: env.TRADE_AGGREGATION_ENABLED === 'true',
       tradeAggregationWindowSeconds: parseInt(env.TRADE_AGGREGATION_WINDOW_SECONDS || '300', 10),
-      previewMode: env.PREVIEW_MODE === 'true' || env.PAPER_MODE === 'true',
+      previewMode: (() => {
+        const raw = stripQuotes(env.PAPER_MODE || env.PREVIEW_MODE || '');
+        if (['false', '0', 'no', 'off'].includes(raw.toLowerCase())) return false;
+        return raw.toLowerCase() === 'true' || raw === '1' || raw.toLowerCase() === 'yes';
+      })(),
       consensusEnabled: env.CONSENSUS_ENABLED === 'true',
       consensusMinAgreement: parseInt(env.CONSENSUS_MIN_AGREEMENT || '2', 10) || 2,
       consensusWindowSeconds: parseInt(env.CONSENSUS_WINDOW_SECONDS || '300', 10) || 300,
@@ -146,8 +150,12 @@ function envToSettings(env: Record<string, string>): BotSettings {
       networkRetryLimit: parseInt(env.NETWORK_RETRY_LIMIT || '3', 10),
     },
     wallet: {
-      proxyWallet: stripQuotes(env.PROXY_WALLET || ''),
-      usdcContract: stripQuotes(env.USDC_CONTRACT_ADDRESS || ''),
+      proxyWallet: stripQuotes(
+        env.PROXY_WALLET || env.POLY_FUNDER || ''
+      ),
+      usdcContract: stripQuotes(
+        env.USDC_CONTRACT_ADDRESS || '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
+      ),
     },
   };
 }
@@ -403,6 +411,21 @@ async function buildEnvView(): Promise<Record<string, string>> {
     process.env.MONGO_URI || env.MONGO_URI
   );
   env = await getMergedEnv(env, { required: mongoConfigured });
+
+  // Polymarket aliases + Coolify live switch (PAPER_MODE=false beats stale Mongo paper=true)
+  if (!stripQuotes(env.PROXY_WALLET || '') && stripQuotes(env.POLY_FUNDER || '')) {
+    env.PROXY_WALLET = stripQuotes(env.POLY_FUNDER);
+  }
+  if (!stripQuotes(env.PRIVATE_KEY || '') && stripQuotes(env.POLY_PRIVATE_KEY || '')) {
+    env.PRIVATE_KEY = stripQuotes(env.POLY_PRIVATE_KEY);
+  }
+  const coolifyPaper =
+    stripQuotes(process.env.PAPER_MODE || '') ||
+    stripQuotes(process.env.PREVIEW_MODE || '');
+  if (['false', '0', 'no', 'off'].includes(coolifyPaper.toLowerCase())) {
+    env.PAPER_MODE = 'false';
+    env.PREVIEW_MODE = 'false';
+  }
 
   return env;
 }

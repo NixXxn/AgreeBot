@@ -92,12 +92,14 @@ export function BotSettingsSection({
 
           {balance && typeof balance.usdc === 'number' && typeof balance.matic === 'number' && (
             <div className="grid grid-cols-2 gap-4">
-              <div className="p-3 bg-muted/50 rounded-lg">
-                <p className="text-xs text-muted-foreground mb-1">USDC Balance</p>
-                <p className={`text-xl font-bold font-mono ${balance.usdc < 10 ? 'text-yellow-500' : 'text-green-500'}`}>
-                  ${balance.usdc.toFixed(2)}
-                </p>
-              </div>
+            <div className="p-3 bg-muted/50 rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">
+                Trading balance (CLOB)
+              </p>
+              <p className={`text-xl font-bold font-mono ${balance.usdc < 10 ? 'text-yellow-500' : 'text-green-500'}`}>
+                ${balance.usdc.toFixed(2)}
+              </p>
+            </div>
               <div className="p-3 bg-muted/50 rounded-lg">
                 <p className="text-xs text-muted-foreground mb-1">MATIC Balance (gas)</p>
                 <p className={`text-xl font-bold font-mono ${balance.matic < 0.1 ? 'text-yellow-500' : ''}`}>

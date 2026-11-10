@@ -229,7 +229,14 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.TRADE_AGGREGATION_ENABLED !== undefined) {
         ENV.TRADE_AGGREGATION_ENABLED = overrides.TRADE_AGGREGATION_ENABLED === 'true';
     }
-    if (overrides.PAPER_MODE !== undefined) {
+    // Coolify PAPER_MODE=false must win over a stale Mongo paper=true override
+    const coolifyPaperRaw = (process.env.PAPER_MODE || process.env.PREVIEW_MODE || '')
+        .trim()
+        .toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(coolifyPaperRaw)) {
+        ENV.PAPER_MODE = false;
+        ENV.PREVIEW_MODE = false;
+    } else if (overrides.PAPER_MODE !== undefined) {
         ENV.PAPER_MODE = overrides.PAPER_MODE === 'true';
         ENV.PREVIEW_MODE = ENV.PAPER_MODE;
     } else if (overrides.PREVIEW_MODE !== undefined) {

@@ -241,7 +241,8 @@ export async function buildBotTradeRows(signals?: LedgerSignal[]): Promise<{
       entered: entered.length,
       skipped: trades.length - entered.length,
       totalPnl: entered.reduce((s, t) => s + (t.pnl ?? 0), 0),
-      paper: trades.some((t) => t.paper) || entered.length > 0,
+      // Only mark summary as paper when entered rows are paper (live mode keeps history)
+      paper: entered.length > 0 && entered.every((t) => t.paper),
       resolved: entered.filter((t) => t.resolved).length,
     },
   };

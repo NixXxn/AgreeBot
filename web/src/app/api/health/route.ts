@@ -45,8 +45,8 @@ export async function GET() {
     result.healthy = false;
   }
 
-  const paperMode =
-    getEnvValue('PAPER_MODE') === 'true' || getEnvValue('PREVIEW_MODE') === 'true';
+  const { resolvePaperMode: resolvePaper } = await import('@/lib/botMode');
+  const paperMode = resolvePaper(overrides);
 
   try {
     // polygon-rpc.com is dead (401). Prefer configured URL, then public fallbacks.
@@ -179,51 +179,37 @@ export async function GET() {
   }
 
   try {
-    const rpcUrl = getEnvValue('RPC_URL');
-    const proxyWallet = (getEnvValue('PROXY_WALLET') || '').replace(/^['"]|['"]$/g, '');
-    const usdcContract =
-      getEnvValue('USDC_CONTRACT_ADDRESS') || '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+    const { resolveProxyWallet, fetchBotClobBalance, resolvePaperMode } = await import(
+      '@/lib/botMode'
+    );
+    const isPaper = resolvePaperMode(overrides);
+    const proxyWallet = resolveProxyWallet(overrides);
 
-    if (paperMode || !proxyWallet || !/^0x[a-fA-F0-9]{40}$/i.test(proxyWallet)) {
-      result.checks.balance = {
-        status: 'ok',
-        message: paperMode ? 'Skipped (paper mode)' : 'Wallet not configured',
-      };
-    } else if (rpcUrl) {
-      const data = `0x70a08231000000000000000000000000${proxyWallet.slice(2).toLowerCase()}`;
-
-      const response = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_call',
-          params: [{ to: usdcContract, data }, 'latest'],
-          id: 1,
-        }),
-      });
-
-      if (response.ok) {
-        const json = await response.json();
-        if (json.result) {
-          const balanceWei = BigInt(json.result);
-          const balance = Number(balanceWei) / 1e6;
-
-          result.checks.balance = {
-            status: balance < 10 ? 'warning' : 'ok',
-            value: balance,
-            message: balance < 10 ? `Low balance: $${balance.toFixed(2)}` : undefined,
-          };
-
-          if (balance < 1) {
-            result.checks.balance.status = 'error';
-            result.checks.balance.message = `Very low balance: $${balance.toFixed(2)}`;
-            result.healthy = false;
-          }
-        }
-      }
+    if (isPaper) {
+      result.checks.balance = { status: 'ok', message: 'Skipped (paper mode)' };
+    } else if (!proxyWallet) {
+      result.checks.balance = { status: 'ok', message: 'Wallet not configured' };
     } else {
-      result.checks.balance = { status: 'warning', message: 'RPC not configured' };
+      const clob = await fetchBotClobBalance();
+      if (clob) {
+        const balance = clob.usdc;
+        result.checks.balance = {
+          status: balance < 1 ? 'error' : balance < 10 ? 'warning' : 'ok',
+          value: balance,
+          message:
+            balance < 1
+              ? `Very low CLOB balance: $${balance.toFixed(2)}`
+              : balance < 10
+                ? `Low CLOB balance: $${balance.toFixed(2)}`
+                : `CLOB balance: $${balance.toFixed(2)}`,
+        };
+        if (balance < 1) result.healthy = false;
+      } else {
+        result.checks.balance = {
+          status: 'warning',
+          message: 'Could not reach bot /balance — restart bot after deploy',
+        };
+      }
     }
   } catch (error) {
     result.checks.balance = { status: 'error', message: `Failed to check balance: ${error}` };
