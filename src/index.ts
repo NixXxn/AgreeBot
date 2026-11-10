@@ -108,6 +108,10 @@ export const main = async () => {
 
         await ensureClobClient();
 
+        // Move mis-tagged "live" rows (void postOrder counted as filled) into paper ledger
+        const { reclassifyBogusLiveSignals } = await import('./services/reclassifyLiveSignals');
+        await reclassifyBogusLiveSignals();
+
         Logger.separator();
         Logger.info('Starting trade monitor...');
         tradeMonitor();

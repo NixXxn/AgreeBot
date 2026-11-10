@@ -203,8 +203,8 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
         );
 
         const side = (trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL';
-        // Paper always returns a result; live success still often returns void → treat as executed
-        const executed = orderResult ? orderResult.executed : true;
+        // Only count a fill when postOrder confirms execution (never assume success)
+        const executed = orderResult.executed === true;
         await recordBotSignal({
             conditionId: trade.conditionId,
             asset: trade.asset,
@@ -214,7 +214,7 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             eventSlug: trade.eventSlug,
             outcome: trade.outcome,
             entryPrice: trade.price,
-            sizeUsd: orderResult?.sizeUsd ?? (executed ? trade.usdcSize : 0),
+            sizeUsd: executed ? orderResult.sizeUsd : 0,
             agreementCount: 1,
             agreeingTraders: [trade.userAddress],
             entered: executed,
@@ -223,7 +223,7 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
                 : side === 'SELL'
                   ? 'no_position'
                   : 'skipped',
-            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+            paper: orderResult.paper,
         });
 
         Logger.separator();
@@ -290,7 +290,7 @@ const doConsensusTrading = async (
             ready.referenceTrader
         );
 
-        const executed = orderResult ? orderResult.executed : true;
+        const executed = orderResult.executed === true;
         await recordBotSignal({
             conditionId: ready.trade.conditionId,
             asset: ready.trade.asset,
@@ -300,13 +300,13 @@ const doConsensusTrading = async (
             eventSlug: ready.trade.eventSlug,
             outcome: ready.trade.outcome,
             entryPrice: ready.trade.price,
-            sizeUsd: orderResult?.sizeUsd ?? (executed ? ready.trade.usdcSize : 0),
+            sizeUsd: executed ? orderResult.sizeUsd : 0,
             agreementCount: ready.agreeingTraders.length,
             agreeingTraders: ready.agreeingTraders,
             entered: executed,
             reason: executed ? 'consensus' : 'skipped',
             minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
-            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+            paper: orderResult.paper,
         });
 
         // Mark contributing trades fully processed
@@ -385,7 +385,7 @@ const doAggregatedTrading = async (
             agg.userAddress
         );
 
-        const executed = orderResult ? orderResult.executed : true;
+        const executed = orderResult.executed === true;
         await recordBotSignal({
             conditionId: agg.conditionId,
             asset: agg.asset,
@@ -395,12 +395,12 @@ const doAggregatedTrading = async (
             eventSlug: agg.eventSlug,
             outcome: agg.trades[0]?.outcome,
             entryPrice: agg.averagePrice,
-            sizeUsd: orderResult?.sizeUsd ?? (executed ? agg.totalUsdcSize : 0),
+            sizeUsd: executed ? orderResult.sizeUsd : 0,
             agreementCount: 1,
             agreeingTraders: [agg.userAddress],
             entered: executed,
             reason: executed ? 'aggregated' : 'skipped',
-            paper: orderResult?.paper ?? ENV.PAPER_MODE,
+            paper: orderResult.paper,
         });
 
         Logger.separator();

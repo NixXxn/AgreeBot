@@ -74,6 +74,8 @@ export interface PostOrderResult {
     paper: boolean;
 }
 
+const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
+
 const postOrder = async (
     clobClient: ClobClient | null,
     condition: string,
@@ -83,7 +85,7 @@ const postOrder = async (
     my_balance: number,
     user_balance: number,
     userAddress: string
-): Promise<PostOrderResult | undefined> => {
+): Promise<PostOrderResult> => {
     const UserActivity = getUserActivityModel(userAddress);
 
     // Paper / preview mode: log the signal and mark processed — never place orders
@@ -165,7 +167,7 @@ const postOrder = async (
         if (!my_position) {
             Logger.warning('No position to merge');
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return;
+            return liveSkip();
         }
         let remaining = my_position.size;
 
@@ -175,11 +177,12 @@ const postOrder = async (
                 `Position size (${remaining.toFixed(2)} tokens) too small to merge - skipping`
             );
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return;
+            return liveSkip();
         }
 
         let retry = 0;
         let abortDueToFunds = false;
+        let filledUsd = 0;
         while (remaining > 0 && retry < RETRY_LIMIT) {
             const orderBook = await clobClient.getOrderBook(trade.asset);
             if (!orderBook.bids || orderBook.bids.length === 0) {
@@ -214,6 +217,7 @@ const postOrder = async (
             const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
             if (resp.success === true) {
                 retry = 0;
+                filledUsd += order_arges.amount * order_arges.price;
                 Logger.orderResult(
                     true,
                     `Sold ${order_arges.amount} tokens at $${order_arges.price}`
@@ -242,13 +246,14 @@ const postOrder = async (
                 { _id: trade._id },
                 { bot: true, botExcutedTime: RETRY_LIMIT }
             );
-            return;
+            return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
         }
         if (retry >= RETRY_LIMIT) {
             await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: retry });
         } else {
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
         }
+        return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
     } else if (condition === 'buy') {
         //Buy strategy
         Logger.info('Executing BUY strategy...');
@@ -278,7 +283,7 @@ const postOrder = async (
                 Logger.warning(`💡 Increase COPY_SIZE or wait for larger trades`);
             }
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return;
+            return liveSkip();
         }
 
         let remaining = orderCalc.finalAmount;
@@ -286,6 +291,7 @@ const postOrder = async (
         let retry = 0;
         let abortDueToFunds = false;
         let totalBoughtTokens = 0; // Track total tokens bought for this trade
+        let filledUsd = 0;
 
         while (remaining > 0 && retry < RETRY_LIMIT) {
             const orderBook = await clobClient.getOrderBook(trade.asset);
@@ -338,6 +344,7 @@ const postOrder = async (
                 retry = 0;
                 const tokensBought = order_arges.amount / order_arges.price;
                 totalBoughtTokens += tokensBought;
+                filledUsd += order_arges.amount;
                 Logger.orderResult(
                     true,
                     `Bought $${order_arges.amount.toFixed(2)} at $${order_arges.price} (${tokensBought.toFixed(2)} tokens)`
@@ -366,7 +373,7 @@ const postOrder = async (
                 { _id: trade._id },
                 { bot: true, botExcutedTime: RETRY_LIMIT, myBoughtSize: totalBoughtTokens }
             );
-            return;
+            return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
         }
         if (retry >= RETRY_LIMIT) {
             await UserActivity.updateOne(
@@ -386,6 +393,7 @@ const postOrder = async (
                 `📝 Tracked purchase: ${totalBoughtTokens.toFixed(2)} tokens for future sell calculations`
             );
         }
+        return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
     } else if (condition === 'sell') {
         //Sell strategy
         Logger.info('Executing SELL strategy...');
@@ -393,7 +401,7 @@ const postOrder = async (
         if (!my_position) {
             Logger.warning('No position to sell');
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return { executed: false, sizeUsd: 0, paper: false };
+            return liveSkip();
         }
 
         // Get all previous BUY trades for this asset to calculate total bought
@@ -466,7 +474,7 @@ const postOrder = async (
             );
             Logger.warning(`💡 This happens when position sizes are too small or mismatched`);
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            return;
+            return liveSkip();
         }
 
         // Cap sell amount to available position size
@@ -481,6 +489,7 @@ const postOrder = async (
         let retry = 0;
         let abortDueToFunds = false;
         let totalSoldTokens = 0; // Track total tokens sold
+        let filledUsd = 0;
 
         while (remaining > 0 && retry < RETRY_LIMIT) {
             const orderBook = await clobClient.getOrderBook(trade.asset);
@@ -528,6 +537,7 @@ const postOrder = async (
             if (resp.success === true) {
                 retry = 0;
                 totalSoldTokens += order_arges.amount;
+                filledUsd += order_arges.amount * order_arges.price;
                 Logger.orderResult(
                     true,
                     `Sold ${order_arges.amount} tokens at $${order_arges.price}`
@@ -591,15 +601,17 @@ const postOrder = async (
                 { _id: trade._id },
                 { bot: true, botExcutedTime: RETRY_LIMIT }
             );
-            return;
+            return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
         }
         if (retry >= RETRY_LIMIT) {
             await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: retry });
         } else {
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
         }
+        return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
     } else {
         Logger.error(`Unknown condition: ${condition}`);
+        return liveSkip();
     }
 };
 

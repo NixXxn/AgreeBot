@@ -266,6 +266,7 @@ export const evaluateConsensusBuffer = async (): Promise<{
                 entered: false,
                 reason: 'consensus_expired',
                 minAgreement,
+                paper: ENV.PAPER_MODE,
             });
 
             consensusBuffer.delete(key);
