@@ -76,6 +76,13 @@ export interface PostOrderResult {
 
 const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
 
+/** Max ± fraction from reference price (default 15%). */
+const slippageFraction = (): number => {
+    const pct = Number(ENV.MAX_SLIPPAGE_PERCENT);
+    if (!Number.isFinite(pct) || pct <= 0) return 0.15;
+    return pct / 100;
+};
+
 const postOrder = async (
     clobClient: ClobClient | null,
     condition: string,
@@ -84,9 +91,17 @@ const postOrder = async (
     trade: UserActivityInterface,
     my_balance: number,
     user_balance: number,
-    userAddress: string
+    userAddress: string,
+    /** Price for slippage band — last agreeing trader's fill for consensus */
+    slippageRefPrice?: number
 ): Promise<PostOrderResult> => {
     const UserActivity = getUserActivityModel(userAddress);
+    const refPrice =
+        slippageRefPrice !== undefined &&
+        Number.isFinite(slippageRefPrice) &&
+        slippageRefPrice > 0
+            ? Number(slippageRefPrice)
+            : Number(trade.price) || 0;
 
     // Paper / preview mode: log the signal and mark processed — never place orders
     if (ENV.PAPER_MODE) {
@@ -307,13 +322,20 @@ const postOrder = async (
                 return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
             }, orderBook.asks[0]);
 
-            Logger.info(`Best ask: ${minPriceAsk.size} @ $${minPriceAsk.price}`);
             const askPrice = parseFloat(minPriceAsk.price);
-            // Hard-coded 5¢ absolute max above reference trader/consensus price
-            if (askPrice - 0.05 > trade.price) {
+            const slip = slippageFraction();
+            const minAsk = refPrice * (1 - slip);
+            const maxAsk = refPrice * (1 + slip);
+            Logger.info(
+                `Best ask: ${minPriceAsk.size} @ $${askPrice.toFixed(4)} | ` +
+                    `ref buy $${refPrice.toFixed(4)} | ` +
+                    `allowed ±${(slip * 100).toFixed(0)}% [$${minAsk.toFixed(4)} … $${maxAsk.toFixed(4)}]`
+            );
+            if (!(askPrice >= minAsk && askPrice <= maxAsk)) {
                 Logger.warning(
                     `Price slippage too high - skipping trade ` +
-                        `(ask $${askPrice.toFixed(3)} > ref $${trade.price.toFixed(3)} + $0.05)`
+                        `(ask $${askPrice.toFixed(4)} outside ±${(slip * 100).toFixed(0)}% of ` +
+                        `ref buy $${refPrice.toFixed(4)})`
                 );
                 await UserActivity.updateOne({ _id: trade._id }, { bot: true });
                 break;

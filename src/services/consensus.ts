@@ -33,6 +33,10 @@ export interface ConsensusReadyTrade {
     agreeingTraders: string[];
     /** Reference trader for balance/position ratio */
     referenceTrader: string;
+    /** Trader who tipped consensus to the threshold (last unique joiner) */
+    lastAgreeingTrader: string;
+    /** That trader's buy/sell price — used for slippage checks */
+    lastAgreeingPrice: number;
 }
 
 const consensusBuffer: Map<string, ConsensusGroup> = new Map();
@@ -165,8 +169,15 @@ const markTradesProcessed = async (
 const buildReadyTrade = (group: ConsensusGroup): ConsensusReadyTrade => {
     // One trade per unique trader (keep largest usdc if duplicates)
     const byTrader = new Map<string, TradeWithUser>();
+    // Order traders by when they first joined the group (last tipper = last agreeing)
+    const joinOrder: string[] = [];
+    const firstJoinTrade = new Map<string, TradeWithUser>();
     for (const t of group.trades) {
         const addr = t.userAddress.toLowerCase();
+        if (!firstJoinTrade.has(addr)) {
+            firstJoinTrade.set(addr, t);
+            joinOrder.push(addr);
+        }
         const prev = byTrader.get(addr);
         if (!prev || t.usdcSize > prev.usdcSize) {
             byTrader.set(addr, t);
@@ -181,6 +192,12 @@ const buildReadyTrade = (group: ConsensusGroup): ConsensusReadyTrade => {
         t.usdcSize > best.usdcSize ? t : best
     );
 
+    const lastAgreeingTrader = joinOrder[joinOrder.length - 1] || reference.userAddress.toLowerCase();
+    // Prefer the fill that first counted them toward consensus; fall back to largest
+    const lastAgreeingTrade =
+        firstJoinTrade.get(lastAgreeingTrader) || byTrader.get(lastAgreeingTrader) || reference;
+    const lastAgreeingPrice = Number(lastAgreeingTrade.price) || avgPrice;
+
     const synthetic: TradeWithUser = {
         ...reference,
         usdcSize: sizedUsdc,
@@ -194,6 +211,8 @@ const buildReadyTrade = (group: ConsensusGroup): ConsensusReadyTrade => {
         contributingTrades: group.trades,
         agreeingTraders: Array.from(group.traderAddresses),
         referenceTrader: reference.userAddress,
+        lastAgreeingTrader,
+        lastAgreeingPrice,
     };
 };
 

@@ -465,6 +465,11 @@ export const ENV = {
         | 'LARGEST'
         | 'FIRST'
         | 'MEDIAN',
+    /**
+     * Max allowed book slippage vs the last agreeing trader's fill price (± percent).
+     * e.g. 15 → ask must be within [ref*0.85, ref*1.15] for BUYs.
+     */
+    MAX_SLIPPAGE_PERCENT: parseFloat(process.env.MAX_SLIPPAGE_PERCENT || '15'),
     // Health HTTP server (Coolify / Docker healthchecks)
     HEALTH_PORT: parseInt(process.env.HEALTH_PORT || process.env.PORT || '3000', 10),
 };

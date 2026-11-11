@@ -247,6 +247,12 @@ const doConsensusTrading = async (
         Logger.info(
             `Traders: ${ready.agreeingTraders.map((a) => `${a.slice(0, 6)}…${a.slice(-4)}`).join(', ')}`
         );
+        Logger.info(
+            `Last agreeing buy: $${ready.lastAgreeingPrice.toFixed(4)} ` +
+                `(${ready.lastAgreeingTrader.slice(0, 6)}…${ready.lastAgreeingTrader.slice(-4)}) | ` +
+                `VWAP $${Number(ready.trade.price).toFixed(4)} | ` +
+                `slippage ±${ENV.MAX_SLIPPAGE_PERCENT}%`
+        );
 
         // Mark all contributing trades as being processed
         for (const trade of ready.contributingTrades) {
@@ -287,7 +293,8 @@ const doConsensusTrading = async (
             ready.trade,
             my_balance,
             user_balance,
-            ready.referenceTrader
+            ready.referenceTrader,
+            ready.lastAgreeingPrice
         );
 
         const executed = orderResult.executed === true;

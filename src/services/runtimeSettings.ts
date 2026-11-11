@@ -304,6 +304,10 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.CONSENSUS_SIZE_MODE) {
         ENV.CONSENSUS_SIZE_MODE = overrides.CONSENSUS_SIZE_MODE.toUpperCase() as typeof ENV.CONSENSUS_SIZE_MODE;
     }
+    if (overrides.MAX_SLIPPAGE_PERCENT) {
+        const slip = parseFloat(overrides.MAX_SLIPPAGE_PERCENT);
+        if (Number.isFinite(slip) && slip > 0) ENV.MAX_SLIPPAGE_PERCENT = slip;
+    }
     if (overrides.FETCH_INTERVAL) {
         ENV.FETCH_INTERVAL = parseInt(overrides.FETCH_INTERVAL, 10) || ENV.FETCH_INTERVAL;
     }
