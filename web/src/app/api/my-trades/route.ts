@@ -143,9 +143,8 @@ async function fetchPositions(address: string) {
 }
 
 async function buildLiveFromBotSignals(wallet: string): Promise<MyTradesResponse> {
-  const { trades, summary } = await buildBotTradeRows(undefined, {
+  const { trades } = await buildBotTradeRows(undefined, {
     paperMode: false,
-    limit: 500,
   });
   const entered = trades.filter((t) => t.entered);
 
