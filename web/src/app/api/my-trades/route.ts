@@ -142,6 +142,11 @@ async function fetchPositions(address: string) {
   }));
 }
 
+function shortLabel(address: string): string {
+  if (!address || address.length < 10) return address || 'unknown';
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
 async function buildLiveFromBotSignals(wallet: string): Promise<MyTradesResponse> {
   const { trades } = await buildBotTradeRows(undefined, {
     paperMode: false,
@@ -160,22 +165,34 @@ async function buildLiveFromBotSignals(wallet: string): Promise<MyTradesResponse
     matchedTrader: t.agreeingTraders[0] || null,
     matchedTraderLabel:
       t.agreeingTraders.length > 0
-        ? t.agreeingTraders.map((a) => `0x…${a.slice(-4)}`).join(', ')
+        ? t.agreeingTraders.map(shortLabel).join(', ')
         : null,
+    agreeingTraders: t.agreeingTraders,
     timeDiff: null,
     paper: false,
     resolved: t.resolved,
     pnl: t.pnl,
+    roi: t.roi,
   }));
 
-  const byTrader = buildByTraderStats(allMyTrades, [], { paperMode: false });
+  // Same as paper: build the trader axis from wallets we actually copied
+  const walletSet = new Set<string>();
+  for (const t of entered) {
+    for (const w of t.agreeingTraders) walletSet.add(w.toLowerCase());
+  }
+  const traders = Array.from(walletSet).map((address) => ({
+    address,
+    label: shortLabel(address),
+  }));
+
+  const byTrader = buildByTraderStats(allMyTrades, traders, { paperMode: false });
   const flow = summarizeCopyTrades(allMyTrades, { paperMode: false });
 
   return {
     analysisDate: new Date().toISOString(),
     myWallet: wallet || '',
     paperMode: false,
-    traders: [],
+    traders,
     allMyTrades,
     byTrader,
     positions: {
@@ -189,8 +206,8 @@ async function buildLiveFromBotSignals(wallet: string): Promise<MyTradesResponse
       totalTrades: allMyTrades.length,
       totalBought: flow.totalBought,
       totalSold: flow.totalSold,
-      matchedTrades: allMyTrades.filter((t) => t.matchedTrader).length,
-      unmatchedTrades: allMyTrades.filter((t) => !t.matchedTrader).length,
+      matchedTrades: entered.filter((t) => t.agreeingTraders.length > 0).length,
+      unmatchedTrades: entered.filter((t) => t.agreeingTraders.length === 0).length,
     },
     message: wallet
       ? `Live bot signals (${allMyTrades.length} entered) for ${wallet.slice(0, 8)}…`

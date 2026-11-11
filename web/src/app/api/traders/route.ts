@@ -7,63 +7,11 @@ import {
 } from '@/lib/runtimeSettings';
 import { getUserAddressesFromEnv } from '@/lib/mongo';
 import { stripQuotes } from '@/lib/env';
+import { buildLiveTraderReports } from '@/lib/liveTraderStats';
+import type { TraderAnalysis } from '@/types/trader';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-export interface MonthlyStats {
-  month: string;
-  totalBought: number;
-  totalSold: number;
-  netFlow: number;
-  tradeCount: number;
-  buyCount: number;
-  sellCount: number;
-}
-
-export interface TraderAnalysis {
-  address: string;
-  label: string;
-  analysisDate: string;
-  periodMonths: number;
-  trades: {
-    total: number;
-    buys: number;
-    sells: number;
-    firstTrade: string;
-    lastTrade: string;
-    daysActive: number;
-  };
-  volume: {
-    totalBought: number;
-    totalSold: number;
-    netFlow: number;
-  };
-  positions: {
-    total: number;
-    open: number;
-    winners: number;
-    losers: number;
-    winRate: number;
-    initialValue: number;
-    currentValue: number;
-  };
-  pnl: {
-    unrealized: number;
-    realized: number;
-    total: number;
-    roi: number;
-    monthlyRoi: number;
-    annualizedRoi: number;
-  };
-  redeemable: {
-    count: number;
-    value: number;
-  };
-  monthlyBreakdown: MonthlyStats[];
-  topWinners: { title: string; outcome: string; pnl: number; roi: number }[];
-  topLosers: { title: string; outcome: string; pnl: number; roi: number }[];
-}
 
 function parseUserAddressesFromEnv(): string[] {
   const raw =
@@ -126,6 +74,7 @@ function placeholderTrader(address: string): TraderAnalysis {
     },
     redeemable: { count: 0, value: 0 },
     monthlyBreakdown: [],
+    dailyBreakdown: [],
     topWinners: [],
     topLosers: [],
   };
@@ -144,7 +93,20 @@ function alignToConfigured(
   );
 }
 
-export async function GET() {
+function reportsLookPopulated(reports: TraderAnalysis[]): boolean {
+  return reports.some(
+    (t) =>
+      t.trades.total > 0 ||
+      t.positions.total > 0 ||
+      Math.abs(t.pnl.total) > 0 ||
+      t.volume.totalBought > 0
+  );
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const forceLive = searchParams.get('refresh') === 'true';
+
   try {
     const envAddresses = parseUserAddressesFromEnv();
     const configured = await getConfiguredTraderAddresses(
@@ -154,48 +116,59 @@ export async function GET() {
     const reportsDir = path.join(process.cwd(), '..', 'trader_reports');
     const summaryPath = path.join(reportsDir, '_SUMMARY.json');
 
-    if (fs.existsSync(summaryPath)) {
-      const summaryData = fs.readFileSync(summaryPath, 'utf-8');
-      const traders: TraderAnalysis[] = JSON.parse(summaryData);
-      if (configured.length > 0) {
+    let fileReports: TraderAnalysis[] = [];
+
+    if (!forceLive && fs.existsSync(summaryPath)) {
+      try {
+        fileReports = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as TraderAnalysis[];
+      } catch {
+        fileReports = [];
+      }
+    } else if (!forceLive && fs.existsSync(reportsDir)) {
+      const files = fs.readdirSync(reportsDir);
+      const jsonFiles = files.filter((f) => f.endsWith('.json') && !f.startsWith('_'));
+      for (const file of jsonFiles) {
+        try {
+          fileReports.push(
+            JSON.parse(fs.readFileSync(path.join(reportsDir, file), 'utf-8')) as TraderAnalysis
+          );
+        } catch {
+          /* skip bad file */
+        }
+      }
+    }
+
+    if (configured.length > 0 && fileReports.length > 0) {
+      const aligned = alignToConfigured(fileReports, configured);
+      if (reportsLookPopulated(aligned)) {
         return NextResponse.json({
-          traders: alignToConfigured(traders, configured),
+          traders: aligned,
           source: 'reports+settings',
         });
       }
-      return NextResponse.json({ traders, source: 'reports' });
+    } else if (configured.length === 0 && fileReports.length > 0 && reportsLookPopulated(fileReports)) {
+      return NextResponse.json({ traders: fileReports, source: 'reports' });
     }
 
-    if (fs.existsSync(reportsDir)) {
-      const files = fs.readdirSync(reportsDir);
-      const jsonFiles = files.filter((f) => f.endsWith('.json') && !f.startsWith('_'));
-      const traders: TraderAnalysis[] = [];
-
-      for (const file of jsonFiles) {
-        const filePath = path.join(reportsDir, file);
-        const content = fs.readFileSync(filePath, 'utf-8');
-        traders.push(JSON.parse(content));
-      }
-
-      if (traders.length > 0) {
-        if (configured.length > 0) {
-          return NextResponse.json({
-            traders: alignToConfigured(traders, configured),
-            source: 'reports+settings',
-          });
-        }
-        return NextResponse.json({ traders, source: 'reports' });
-      }
-    }
-
-    // Coolify / paper mode: no analyze reports yet — list configured wallets
+    // No usable offline reports — fetch live Data API stats for configured wallets
     if (configured.length > 0) {
-      return NextResponse.json({
-        traders: configured.map(placeholderTrader),
-        source: 'settings',
-        message:
-          'Showing wallets from Settings / USER_ADDRESSES. Run npm run analyze for full P&L charts.',
-      });
+      try {
+        const live = await buildLiveTraderReports(configured);
+        return NextResponse.json({
+          traders: live,
+          source: 'live-data-api',
+          message:
+            'Live Polymarket stats for wallets in Settings / USER_ADDRESSES (newest ~300 trades each).',
+        });
+      } catch (error) {
+        console.error('Live trader stats failed:', error);
+        return NextResponse.json({
+          traders: configured.map(placeholderTrader),
+          source: 'settings',
+          message:
+            'Could not fetch live trader stats. Showing wallet list only — retry refresh.',
+        });
+      }
     }
 
     return NextResponse.json(

@@ -63,6 +63,12 @@ export function walletsForTrade(trade: CopyTrade): string[] {
   return ['unmatched'];
 }
 
+function shortWalletLabel(address: string): string {
+  if (!address || address === 'unmatched') return 'Unmatched Trades';
+  if (address.length < 10) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
 export function buildByTraderStats(
   trades: CopyTrade[],
   traders: { address: string; label: string }[],
@@ -71,21 +77,36 @@ export function buildByTraderStats(
   const paperMode = Boolean(options?.paperMode);
   const byTraderMap = new Map<string, CopyTrade[]>();
   byTraderMap.set('unmatched', []);
+
+  const labelByAddress = new Map<string, string>();
   for (const trader of traders) {
-    byTraderMap.set(trader.address.toLowerCase(), []);
+    const addr = trader.address.toLowerCase();
+    byTraderMap.set(addr, []);
+    labelByAddress.set(addr, trader.label || shortWalletLabel(addr));
   }
 
   for (const trade of trades) {
     const wallets = walletsForTrade(trade);
     for (const key of wallets) {
-      const list = byTraderMap.get(key) || [];
-      list.push(trade);
-      byTraderMap.set(key, list);
+      if (!byTraderMap.has(key)) {
+        byTraderMap.set(key, []);
+        if (key !== 'unmatched' && !labelByAddress.has(key)) {
+          labelByAddress.set(key, shortWalletLabel(key));
+        }
+      }
+      byTraderMap.get(key)!.push(trade);
     }
   }
 
-  const rows: TraderCopyStats[] = traders.map((trader) => {
-    const list = byTraderMap.get(trader.address.toLowerCase()) || [];
+  const traderKeys = Array.from(
+    new Set([
+      ...traders.map((t) => t.address.toLowerCase()),
+      ...Array.from(byTraderMap.keys()).filter((k) => k !== 'unmatched'),
+    ])
+  );
+
+  const rows: TraderCopyStats[] = traderKeys.map((addr) => {
+    const list = byTraderMap.get(addr) || [];
     // Proportional attribution when a trade is shared across agreeing wallets
     const stats = list.reduce(
       (acc, trade) => {
@@ -101,8 +122,8 @@ export function buildByTraderStats(
     );
 
     return {
-      traderAddress: trader.address,
-      traderLabel: trader.label,
+      traderAddress: addr,
+      traderLabel: labelByAddress.get(addr) || shortWalletLabel(addr),
       trades: list,
       tradeCount: list.length,
       totalBought: stats.totalBought,
@@ -123,5 +144,7 @@ export function buildByTraderStats(
     });
   }
 
-  return rows.sort((a, b) => b.tradeCount - a.tradeCount);
+  return rows
+    .filter((r) => r.tradeCount > 0 || traders.some((t) => t.address.toLowerCase() === r.traderAddress))
+    .sort((a, b) => b.tradeCount - a.tradeCount);
 }
