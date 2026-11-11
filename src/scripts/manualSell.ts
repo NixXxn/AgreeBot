@@ -1,6 +1,12 @@
 import { ethers } from 'ethers';
-import { AssetType, ClobClient, OrderType, Side } from '@polymarket/clob-client';
-import { SignatureType } from '@polymarket/order-utils';
+import {
+    AssetType,
+    Chain,
+    ClobClient,
+    OrderType,
+    Side,
+    SignatureTypeV2,
+} from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import fetchData from '../utils/fetchData';
 
@@ -8,7 +14,6 @@ const PROXY_WALLET = ENV.PROXY_WALLET;
 const PRIVATE_KEY = ENV.PRIVATE_KEY;
 const CLOB_HTTP_URL = ENV.CLOB_HTTP_URL;
 const RPC_URL = ENV.RPC_URL;
-const POLYGON_CHAIN_ID = 137;
 const RETRY_LIMIT = ENV.RETRY_LIMIT;
 
 // ABI для получения информации о рынке
@@ -43,7 +48,7 @@ const createClobClient = async (
 ): Promise<ClobClient> => {
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     const isProxySafe = await isGnosisSafe(PROXY_WALLET, provider);
-    const signatureType = isProxySafe ? SignatureType.POLY_GNOSIS_SAFE : SignatureType.EOA;
+    const signatureType = isProxySafe ? SignatureTypeV2.POLY_GNOSIS_SAFE : SignatureTypeV2.EOA;
 
     console.log(`Wallet type: ${isProxySafe ? 'Gnosis Safe' : 'EOA'}`);
 
@@ -52,31 +57,33 @@ const createClobClient = async (
     console.log = function () {};
     console.error = function () {};
 
-    let clobClient = new ClobClient(
-        CLOB_HTTP_URL,
-        POLYGON_CHAIN_ID,
-        wallet,
-        undefined,
-        signatureType,
-        isProxySafe ? PROXY_WALLET : undefined
-    );
-
-    let creds = await clobClient.createApiKey();
-    if (!creds.key) {
-        creds = await clobClient.deriveApiKey();
+    const host = String(CLOB_HTTP_URL || '').replace(/\/$/, '');
+    const funder = isProxySafe ? PROXY_WALLET : undefined;
+    let clobClient: ClobClient;
+    try {
+        const bootstrap = new ClobClient({
+            host,
+            chain: Chain.POLYGON,
+            signer: wallet,
+            signatureType,
+            funderAddress: funder,
+        });
+        const creds = await bootstrap.createOrDeriveApiKey();
+        clobClient = new ClobClient({
+            host,
+            chain: Chain.POLYGON,
+            signer: wallet,
+            creds,
+            signatureType,
+            funderAddress: funder,
+            useServerTime: true,
+            retryOnError: true,
+        });
+        await clobClient.getVersion().catch(() => undefined);
+    } finally {
+        console.log = originalConsoleLog;
+        console.error = originalConsoleError;
     }
-
-    clobClient = new ClobClient(
-        CLOB_HTTP_URL,
-        POLYGON_CHAIN_ID,
-        wallet,
-        creds,
-        signatureType,
-        isProxySafe ? PROXY_WALLET : undefined
-    );
-
-    console.log = originalConsoleLog;
-    console.error = originalConsoleError;
 
     return clobClient;
 };

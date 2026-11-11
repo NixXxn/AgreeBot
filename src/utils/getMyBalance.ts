@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { AssetType, ClobClient } from '@polymarket/clob-client';
+import { AssetType, ClobClient } from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import { createPolygonProvider } from './rpcProvider';
 import Logger from './logger';

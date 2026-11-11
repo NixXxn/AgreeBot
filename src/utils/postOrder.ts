@@ -1,4 +1,4 @@
-import { ClobClient, OrderType, Side } from '@polymarket/clob-client';
+import { ClobClient, OrderType, Side } from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import { UserActivityInterface, UserPositionInterface } from '../interfaces/User';
 import { getUserActivityModel } from '../models/userHistory';
@@ -212,9 +212,11 @@ const postOrder = async (
                     price: parseFloat(maxPriceBid.price),
                 };
             }
-            // Order args logged internally
-            const signedOrder = await clobClient.createMarketOrder(order_arges);
-            const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
+            const resp = await clobClient.createAndPostMarketOrder(
+                order_arges,
+                undefined,
+                OrderType.FOK
+            );
             if (resp.success === true) {
                 retry = 0;
                 filledUsd += order_arges.amount * order_arges.price;
@@ -306,8 +308,13 @@ const postOrder = async (
             }, orderBook.asks[0]);
 
             Logger.info(`Best ask: ${minPriceAsk.size} @ $${minPriceAsk.price}`);
-            if (parseFloat(minPriceAsk.price) - 0.05 > trade.price) {
-                Logger.warning('Price slippage too high - skipping trade');
+            const askPrice = parseFloat(minPriceAsk.price);
+            // Hard-coded 5¢ absolute max above reference trader/consensus price
+            if (askPrice - 0.05 > trade.price) {
+                Logger.warning(
+                    `Price slippage too high - skipping trade ` +
+                        `(ask $${askPrice.toFixed(3)} > ref $${trade.price.toFixed(3)} + $0.05)`
+                );
                 await UserActivity.updateOne({ _id: trade._id }, { bot: true });
                 break;
             }
@@ -324,22 +331,36 @@ const postOrder = async (
                 break;
             }
 
-            const maxOrderSize = parseFloat(minPriceAsk.size) * parseFloat(minPriceAsk.price);
-            const orderSize = Math.min(remaining, maxOrderSize);
+            const maxOrderSize = parseFloat(minPriceAsk.size) * askPrice;
+            // CLOB v2 market buys: max 2 decimal places on USDC amount
+            const orderSize =
+                Math.floor(Math.min(remaining, maxOrderSize) * 100) / 100;
+            if (orderSize < MIN_ORDER_SIZE_USD) {
+                Logger.info(
+                    `Rounded order size ($${orderSize.toFixed(2)}) below minimum — completing trade`
+                );
+                await UserActivity.updateOne(
+                    { _id: trade._id },
+                    { bot: true, myBoughtSize: totalBoughtTokens }
+                );
+                break;
+            }
 
             const order_arges = {
                 side: Side.BUY,
                 tokenID: trade.asset,
                 amount: orderSize,
-                price: parseFloat(minPriceAsk.price),
+                price: askPrice,
             };
 
             Logger.info(
-                `Creating order: $${orderSize.toFixed(2)} @ $${minPriceAsk.price} (Balance: $${my_balance.toFixed(2)})`
+                `Creating order: $${orderSize.toFixed(2)} @ $${askPrice} (Balance: $${my_balance.toFixed(2)})`
             );
-            // Order args logged internally
-            const signedOrder = await clobClient.createMarketOrder(order_arges);
-            const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
+            const resp = await clobClient.createAndPostMarketOrder(
+                order_arges,
+                undefined,
+                OrderType.FOK
+            );
             if (resp.success === true) {
                 retry = 0;
                 const tokensBought = order_arges.amount / order_arges.price;
@@ -531,9 +552,11 @@ const postOrder = async (
                 amount: sellAmount,
                 price: parseFloat(maxPriceBid.price),
             };
-            // Order args logged internally
-            const signedOrder = await clobClient.createMarketOrder(order_arges);
-            const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
+            const resp = await clobClient.createAndPostMarketOrder(
+                order_arges,
+                undefined,
+                OrderType.FOK
+            );
             if (resp.success === true) {
                 retry = 0;
                 totalSoldTokens += order_arges.amount;

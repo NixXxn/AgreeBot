@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
-import { ClobClient } from '@polymarket/clob-client';
-import { SignatureType } from '@polymarket/order-utils';
+import { Chain, ClobClient, SignatureTypeV2 } from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import Logger from './logger';
 import { createPolygonProvider } from './rpcProvider';
@@ -8,9 +7,6 @@ import { createPolygonProvider } from './rpcProvider';
 const PROXY_WALLET = ENV.PROXY_WALLET;
 const PRIVATE_KEY = ENV.PRIVATE_KEY;
 const CLOB_HTTP_URL = ENV.CLOB_HTTP_URL;
-
-/** POLY_1271 deposit wallets use signature type 3 (not yet in order-utils enum). */
-const POLY_1271 = 3 as SignatureType;
 
 /**
  * Determines if a wallet is a Gnosis Safe by checking if it has contract code
@@ -27,7 +23,7 @@ const isGnosisSafe = async (address: string): Promise<boolean> => {
 };
 
 const resolveSignatureType = async (): Promise<{
-    signatureType: SignatureType;
+    signatureType: SignatureTypeV2;
     label: string;
     funder?: string;
 }> => {
@@ -35,70 +31,89 @@ const resolveSignatureType = async (): Promise<{
     const raw = ENV.POLY_SIGNATURE_TYPE;
     if (raw !== '') {
         const n = parseInt(raw, 10);
-        if (n === 0) return { signatureType: SignatureType.EOA, label: 'EOA (0)', funder };
+        if (n === 0) return { signatureType: SignatureTypeV2.EOA, label: 'EOA (0)', funder };
         if (n === 1)
-            return { signatureType: SignatureType.POLY_PROXY, label: 'POLY_PROXY (1)', funder };
+            return { signatureType: SignatureTypeV2.POLY_PROXY, label: 'POLY_PROXY (1)', funder };
         if (n === 2)
             return {
-                signatureType: SignatureType.POLY_GNOSIS_SAFE,
+                signatureType: SignatureTypeV2.POLY_GNOSIS_SAFE,
                 label: 'POLY_GNOSIS_SAFE (2)',
                 funder,
             };
-        if (n === 3) return { signatureType: POLY_1271, label: 'POLY_1271 (3)', funder };
+        if (n === 3)
+            return { signatureType: SignatureTypeV2.POLY_1271, label: 'POLY_1271 (3)', funder };
         Logger.warning(`Unknown POLY_SIGNATURE_TYPE=${raw} — falling back to auto-detect`);
     }
 
     if (!funder) {
-        return { signatureType: SignatureType.EOA, label: 'EOA (auto, no funder)' };
+        return { signatureType: SignatureTypeV2.EOA, label: 'EOA (auto, no funder)' };
     }
 
     const isProxySafe = await isGnosisSafe(funder);
     if (isProxySafe) {
         return {
-            signatureType: SignatureType.POLY_GNOSIS_SAFE,
+            signatureType: SignatureTypeV2.POLY_GNOSIS_SAFE,
             label: 'POLY_GNOSIS_SAFE (auto)',
             funder,
         };
     }
     // Polymarket proxy / deposit wallets are often EOAs with code 0x — default PROXY when funder set
     return {
-        signatureType: SignatureType.POLY_PROXY,
+        signatureType: SignatureTypeV2.POLY_PROXY,
         label: 'POLY_PROXY (auto)',
         funder,
     };
 };
 
 const createClobClient = async (): Promise<ClobClient> => {
-    const chainId = 137;
-    const host = CLOB_HTTP_URL as string;
+    const host = (CLOB_HTTP_URL as string).replace(/\/$/, '');
     const wallet = new ethers.Wallet(PRIVATE_KEY as string);
     const { signatureType, label, funder } = await resolveSignatureType();
 
     Logger.info(`CLOB wallet signature type: ${label}${funder ? ` funder=${funder}` : ''}`);
-
-    let clobClient = new ClobClient(
-        host,
-        chainId,
-        wallet,
-        undefined,
-        signatureType,
-        funder
-    );
 
     const originalConsoleLog = console.log;
     const originalConsoleError = console.error;
     console.log = function () {};
     console.error = function () {};
 
-    let creds = await clobClient.createApiKey();
-    if (!creds.key) {
-        creds = await clobClient.deriveApiKey();
+    let creds;
+    try {
+        const bootstrap = new ClobClient({
+            host,
+            chain: Chain.POLYGON,
+            signer: wallet,
+            signatureType,
+            funderAddress: funder,
+        });
+        creds = await bootstrap.createOrDeriveApiKey();
+    } finally {
+        console.log = originalConsoleLog;
+        console.error = originalConsoleError;
     }
 
-    clobClient = new ClobClient(host, chainId, wallet, creds, signatureType, funder);
+    const clobClient = new ClobClient({
+        host,
+        chain: Chain.POLYGON,
+        signer: wallet,
+        creds,
+        signatureType,
+        funderAddress: funder,
+        useServerTime: true,
+        retryOnError: true,
+    });
 
-    console.log = originalConsoleLog;
-    console.error = originalConsoleError;
+    // Adopt server order version (CLOB v2+) so posts aren't rejected as "invalid order version"
+    try {
+        const version = await clobClient.getVersion();
+        Logger.info(`CLOB order protocol version: ${version}`);
+    } catch (error) {
+        Logger.warning(
+            `Could not fetch CLOB order version (will recover on first post): ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
 
     return clobClient;
 };

@@ -1,4 +1,4 @@
-import { AssetType, ClobClient, OrderType, Side } from '@polymarket/clob-client';
+import { AssetType, ClobClient, OrderType, Side } from '@polymarket/clob-client-v2';
 import { ethers } from 'ethers';
 import { ENV } from '../config/env';
 import { fetchUserPositions } from '../utils/polymarketData';
@@ -200,8 +200,11 @@ const trySellPosition = async (
         };
 
         try {
-            const signedOrder = await clobClient.createMarketOrder(orderArgs);
-            const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
+            const resp = await clobClient.createAndPostMarketOrder(
+                orderArgs,
+                undefined,
+                OrderType.FOK
+            );
 
             if (resp.success === true) {
                 const tradeValue = sellAmount * bidPrice;
