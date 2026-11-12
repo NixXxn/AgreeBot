@@ -5,7 +5,9 @@ import { fetchActivityCursor } from './polymarketActivity';
 const DATA_API_V2 = 'https://data-api.polymarket.com/v2';
 /** Hard ceiling per wallet so a bad API can't loop forever. */
 const MAX_ACTIVITY_PAGES = 100;
-const CONCURRENCY = 4;
+/** Keep Data API under rate limits with large trader lists. */
+const CONCURRENCY = 2;
+const CACHE_TTL_MS = 30 * 60 * 1000;
 const ACTIVITY_COLLECTION = 'trader_activity';
 const STATS_COLLECTION = 'trader_stats_cache';
 
@@ -45,26 +47,44 @@ function formatDate(ts: number): string {
   return new Date(ts * 1000).toISOString().split('T')[0];
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    signal: AbortSignal.timeout(20000),
-  });
-  const text = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    throw new Error(`Bad JSON from ${url} (${response.status})`);
-  }
-  if (!response.ok) {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchJson(url: string, retries = 4): Promise<unknown> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await response.text();
+    let payload: unknown = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error(`Bad JSON from ${url} (${response.status})`);
+    }
+    if (response.ok) return payload;
+
     const errMsg =
       payload && typeof payload === 'object' && 'error' in (payload as object)
         ? String((payload as { error: unknown }).error)
         : `HTTP ${response.status}`;
-    throw new Error(`Data API ${response.status} for ${url}: ${errMsg}`);
+    lastError = new Error(`Data API ${response.status} for ${url}: ${errMsg}`);
+
+    if (response.status === 429 || response.status === 503) {
+      const retryAfter = Number(response.headers.get('retry-after') || '');
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(8000, 750 * 2 ** attempt);
+      await sleep(waitMs);
+      continue;
+    }
+    throw lastError;
   }
-  return payload;
+  throw lastError || new Error(`Data API failed for ${url}`);
 }
 
 type ActivityRow = {
@@ -130,17 +150,39 @@ async function saveStoredActivity(address: string, trades: ActivityRow[]): Promi
 }
 
 async function loadCachedStats(address: string): Promise<TraderAnalysis | null> {
+  const map = await loadCachedStatsMany([address]);
+  return map.get(address.toLowerCase()) || null;
+}
+
+async function loadCachedStatsMany(
+  addresses: string[]
+): Promise<Map<string, TraderAnalysis>> {
+  const out = new Map<string, TraderAnalysis>();
+  if (addresses.length === 0) return out;
   try {
     const db = await getDb();
-    if (!db) return null;
-    const doc = (await db.collection(STATS_COLLECTION).findOne({
-      _id: address,
-    } as never)) as unknown as { report?: TraderAnalysis } | null;
-    if (!doc?.report) return null;
-    return doc.report;
-  } catch {
-    return null;
+    if (!db) return out;
+    const ids = addresses.map((a) => a.toLowerCase());
+    const docs = await db
+      .collection(STATS_COLLECTION)
+      .find({ _id: { $in: ids } } as never)
+      .toArray();
+    for (const doc of docs) {
+      const report = (doc as unknown as { report?: TraderAnalysis }).report;
+      const id = String((doc as { _id?: unknown })._id || '').toLowerCase();
+      if (report && id) out.set(id, report);
+    }
+  } catch (error) {
+    console.warn('Failed to load trader stats cache batch:', error);
   }
+  return out;
+}
+
+function cacheAgeMs(report: TraderAnalysis | null | undefined): number {
+  if (!report?.analysisDate) return Number.POSITIVE_INFINITY;
+  const t = Date.parse(report.analysisDate);
+  if (!Number.isFinite(t)) return Number.POSITIVE_INFINITY;
+  return Date.now() - t;
 }
 
 async function saveCachedStats(report: TraderAnalysis): Promise<void> {
@@ -165,15 +207,25 @@ async function saveCachedStats(report: TraderAnalysis): Promise<void> {
 
 /**
  * Pull Data API activity (cursor pages), merge with Mongo history, never drop old rows.
- * Stops early once a fetched page adds nothing new (overlap with stored history).
+ * `light` only pulls a couple pages (rate-limit friendly for large trader lists).
  */
-async function fetchAndMergeActivity(address: string): Promise<ActivityRow[]> {
+async function fetchAndMergeActivity(
+  address: string,
+  options?: { light?: boolean }
+): Promise<ActivityRow[]> {
   const stored = await loadStoredActivity(address);
   const byKey = new Map<string, ActivityRow>();
   for (const row of stored) byKey.set(activityKey(row), row);
 
-  // First pass: enough pages to catch up; if store empty, pull a deep history once
-  const maxPages = stored.length > 0 ? Math.min(10, MAX_ACTIVITY_PAGES) : MAX_ACTIVITY_PAGES;
+  const light = Boolean(options?.light);
+  const maxPages = light
+    ? stored.length > 0
+      ? 1
+      : 3
+    : stored.length > 0
+      ? Math.min(5, MAX_ACTIVITY_PAGES)
+      : Math.min(20, MAX_ACTIVITY_PAGES);
+
   const fresh = await fetchActivityCursor(address, { limit: 100, maxPages });
 
   let newCount = 0;
@@ -443,12 +495,15 @@ function preferRicher(a: TraderAnalysis, b: TraderAnalysis | null): TraderAnalys
   };
 }
 
-export async function analyzeTraderLive(address: string): Promise<TraderAnalysis> {
+export async function analyzeTraderLive(
+  address: string,
+  options?: { light?: boolean; cached?: TraderAnalysis | null }
+): Promise<TraderAnalysis> {
   const addr = address.toLowerCase();
-  const cached = await loadCachedStats(addr);
+  const cached = options?.cached !== undefined ? options.cached : await loadCachedStats(addr);
   try {
     const [activity, positions] = await Promise.all([
-      fetchAndMergeActivity(addr),
+      fetchAndMergeActivity(addr, { light: options?.light }),
       fetchPositions(addr),
     ]);
 
@@ -459,7 +514,11 @@ export async function analyzeTraderLive(address: string): Promise<TraderAnalysis
     await saveCachedStats(report);
     return report;
   } catch (error) {
-    console.warn(`Live trader stats failed for ${addr}:`, error);
+    const msg = error instanceof Error ? error.message : String(error);
+    // Don't spam logs for expected rate limits — cache covers the UI
+    if (!/Data API 429/.test(msg)) {
+      console.warn(`Live trader stats failed for ${addr}:`, error);
+    }
     return cached || emptyTrader(addr);
   }
 }
@@ -476,16 +535,86 @@ async function mapPool<T, R>(
       const i = next++;
       if (i >= items.length) return;
       out[i] = await fn(items[i]);
+      // Small gap between wallets to stay under Data API burst limits
+      await sleep(150);
     }
   });
   await Promise.all(workers);
   return out;
 }
 
-/** Live Polymarket Data API stats — activity is merged into Mongo and never truncated. */
+export type LiveTraderReportsResult = {
+  traders: TraderAnalysis[];
+  source: 'cache' | 'live-data-api' | 'cache+partial-refresh';
+  refreshed: number;
+  cached: number;
+  message?: string;
+};
+
+/**
+ * Prefer Mongo cache for fast dashboard loads. Only hit Data API for missing/stale
+ * wallets (or all on forceRefresh), with low concurrency + 429 retries.
+ */
 export async function buildLiveTraderReports(
-  addresses: string[]
-): Promise<TraderAnalysis[]> {
+  addresses: string[],
+  options?: { forceRefresh?: boolean }
+): Promise<LiveTraderReportsResult> {
   const unique = Array.from(new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean)));
-  return mapPool(unique, CONCURRENCY, analyzeTraderLive);
+  const cachedMap = await loadCachedStatsMany(unique);
+  const forceRefresh = Boolean(options?.forceRefresh);
+
+  const needsRefresh = unique.filter((addr) => {
+    const cached = cachedMap.get(addr);
+    if (!cached) return true;
+    if (forceRefresh) return true;
+    return cacheAgeMs(cached) > CACHE_TTL_MS;
+  });
+
+  // Fast path: serve cache when most wallets are fresh
+  if (!forceRefresh && needsRefresh.length === 0 && cachedMap.size > 0) {
+    return {
+      traders: unique.map((a) => cachedMap.get(a) || emptyTrader(a)),
+      source: 'cache',
+      refreshed: 0,
+      cached: cachedMap.size,
+      message: `Cached trader stats (${cachedMap.size} wallets, TTL ${CACHE_TTL_MS / 60000}m)`,
+    };
+  }
+
+  // On normal page load with a large list, only top up a small batch of missing/stale
+  // so the dashboard returns quickly; full refresh is via ?refresh=true
+  const refreshBatch = forceRefresh
+    ? needsRefresh
+    : needsRefresh.slice(0, Math.min(12, needsRefresh.length));
+
+  if (refreshBatch.length > 0) {
+    const fresh = await mapPool(refreshBatch, CONCURRENCY, (addr) =>
+      analyzeTraderLive(addr, {
+        light: !forceRefresh || unique.length > 40,
+        cached: cachedMap.get(addr) || null,
+      })
+    );
+    for (const report of fresh) {
+      cachedMap.set(report.address.toLowerCase(), report);
+    }
+  }
+
+  const traders = unique.map((a) => cachedMap.get(a) || emptyTrader(a));
+  const stillMissing = unique.filter((a) => !cachedMap.has(a)).length;
+
+  return {
+    traders,
+    source: forceRefresh
+      ? 'live-data-api'
+      : refreshBatch.length > 0
+        ? 'cache+partial-refresh'
+        : 'cache',
+    refreshed: refreshBatch.length,
+    cached: unique.length - stillMissing,
+    message: forceRefresh
+      ? `Refreshed ${refreshBatch.length} wallet(s) from Polymarket Data API`
+      : stillMissing > 0 || needsRefresh.length > refreshBatch.length
+        ? `Loaded cache; refreshed ${refreshBatch.length} stale/missing (use Refresh for full update; ${needsRefresh.length} needed)`
+        : `Cached trader stats (${cachedMap.size} wallets)`,
+  };
 }

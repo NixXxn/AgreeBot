@@ -150,15 +150,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ traders: fileReports, source: 'reports' });
     }
 
-    // No usable offline reports — fetch live Data API stats for configured wallets
+    // No usable offline reports — Mongo cache first, Data API only for stale/missing
     if (configured.length > 0) {
       try {
-        const live = await buildLiveTraderReports(configured);
+        const live = await buildLiveTraderReports(configured, {
+          forceRefresh: forceLive,
+        });
         return NextResponse.json({
-          traders: live,
-          source: 'live-data-api',
-          message:
-            'Live Polymarket stats for Settings / USER_ADDRESSES — trade history is merged in Mongo and kept across refreshes.',
+          traders: live.traders,
+          source: live.source,
+          refreshed: live.refreshed,
+          cached: live.cached,
+          message: live.message,
         });
       } catch (error) {
         console.error('Live trader stats failed:', error);

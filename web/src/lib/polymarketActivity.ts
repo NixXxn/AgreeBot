@@ -60,26 +60,44 @@ function toUnixSeconds(raw: unknown): number {
   return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    signal: AbortSignal.timeout(20000),
-  });
-  const text = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    throw new Error(`Bad JSON from ${url} (${response.status})`);
-  }
-  if (!response.ok) {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchJson(url: string, retries = 4): Promise<unknown> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await response.text();
+    let payload: unknown = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error(`Bad JSON from ${url} (${response.status})`);
+    }
+
+    if (response.ok) return payload;
+
     const errMsg =
       payload && typeof payload === 'object' && 'error' in (payload as object)
         ? String((payload as { error: unknown }).error)
         : `HTTP ${response.status}`;
-    throw new Error(`Data API ${response.status} for ${url}: ${errMsg}`);
+    lastError = new Error(`Data API ${response.status} for ${url}: ${errMsg}`);
+
+    if (response.status === 429 || response.status === 503) {
+      const retryAfter = Number(response.headers.get('retry-after') || '');
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : Math.min(8000, 500 * 2 ** attempt);
+      await sleep(waitMs);
+      continue;
+    }
+    throw lastError;
   }
-  return payload;
+  throw lastError || new Error(`Data API failed for ${url}`);
 }
 
 function parseRow(row: Json): PolymarketActivityRow | null {
