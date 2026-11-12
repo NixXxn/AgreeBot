@@ -65,11 +65,11 @@ const syncCoolifyUserAddresses = async (): Promise<void> => {
                 : undefined;
 
         if (prevFp === undefined) {
+            // Fingerprint only — never touch `values` here (avoids path conflicts with paper sync)
             await RuntimeSettings.findByIdAndUpdate(
                 RUNTIME_SETTINGS_ID,
                 {
                     $set: { coolifyUserAddressesFp: fp, updatedAt: new Date() },
-                    $setOnInsert: { values: {} },
                 },
                 { upsert: true }
             );
@@ -88,17 +88,11 @@ const syncCoolifyUserAddresses = async (): Promise<void> => {
             return;
         }
 
-        const existing =
-            doc?.values && typeof doc.values === 'object'
-                ? { ...(doc.values as Record<string, string>) }
-                : {};
-        existing.USER_ADDRESSES = addresses.join(',');
-
         await RuntimeSettings.findByIdAndUpdate(
             RUNTIME_SETTINGS_ID,
             {
                 $set: {
-                    values: existing,
+                    'values.USER_ADDRESSES': addresses.join(','),
                     coolifyUserAddressesFp: fp,
                     updatedAt: new Date(),
                 },
@@ -151,42 +145,49 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
 
         // Baseline fingerprint on first boot. Only overwrite Mongo when Coolify itself changes —
         // dashboard Settings owns paper/live after that.
-        // Use dotted paths only — never $set `values` + $setOnInsert `values` (Mongo conflict).
+        // Never mix $set `values` with $setOnInsert `values` or concurrent whole-object replaces.
         if (prevFp === undefined) {
-            const setDoc: Record<string, unknown> = {
-                coolifyPaperModeFp: fp,
-                updatedAt: new Date(),
-            };
+            await RuntimeSettings.findByIdAndUpdate(
+                RUNTIME_SETTINGS_ID,
+                {
+                    $set: {
+                        coolifyPaperModeFp: fp,
+                        updatedAt: new Date(),
+                    },
+                },
+                { upsert: true }
+            );
             if (
                 raw !== '' &&
                 existing.PAPER_MODE === undefined &&
                 existing.PREVIEW_MODE === undefined
             ) {
-                setDoc['values.PAPER_MODE'] = paperOn ? 'true' : 'false';
-                setDoc['values.PREVIEW_MODE'] = paperOn ? 'true' : 'false';
+                await RuntimeSettings.findByIdAndUpdate(RUNTIME_SETTINGS_ID, {
+                    $set: {
+                        'values.PAPER_MODE': paperOn ? 'true' : 'false',
+                        'values.PREVIEW_MODE': paperOn ? 'true' : 'false',
+                        updatedAt: new Date(),
+                    },
+                });
             }
-            await RuntimeSettings.findByIdAndUpdate(
-                RUNTIME_SETTINGS_ID,
-                { $set: setDoc },
-                { upsert: true }
-            );
             return;
         }
 
         if (prevFp === fp) return;
 
-        await RuntimeSettings.findByIdAndUpdate(
-            RUNTIME_SETTINGS_ID,
-            {
-                $set: {
-                    'values.PAPER_MODE': paperOn ? 'true' : 'false',
-                    'values.PREVIEW_MODE': paperOn ? 'true' : 'false',
-                    coolifyPaperModeFp: fp,
-                    updatedAt: new Date(),
-                },
+        await RuntimeSettings.findByIdAndUpdate(RUNTIME_SETTINGS_ID, {
+            $set: {
+                coolifyPaperModeFp: fp,
+                updatedAt: new Date(),
             },
-            { upsert: true }
-        );
+        });
+        await RuntimeSettings.findByIdAndUpdate(RUNTIME_SETTINGS_ID, {
+            $set: {
+                'values.PAPER_MODE': paperOn ? 'true' : 'false',
+                'values.PREVIEW_MODE': paperOn ? 'true' : 'false',
+                updatedAt: new Date(),
+            },
+        });
 
         Logger.success(
             `Coolify PAPER_MODE changed — adopted ${paperOn ? 'paper' : 'live'} into Mongo`

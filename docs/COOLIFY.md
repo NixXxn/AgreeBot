@@ -32,7 +32,7 @@ In the Coolify app → **Environment Variables**, set at least:
 | `PROXY_WALLET` | Your Polygon address: `0x` + 40 hex chars. **Required** — empty value crashes the bot |
 | `PRIVATE_KEY` | Key **without** `0x` — mark as secret. **Required** |
 | `MONGO_URI` | `mongodb+srv://...` Atlas string |
-| `RPC_URL` | Your Polygon RPC |
+| `RPC_URL` | Polygon RPC (avoid bare publicnode — redeems need receipt access; Alchemy/Infura/1rpc) |
 | `CLOB_HTTP_URL` | `https://clob.polymarket.com/` |
 | `CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws` |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` |

@@ -60,7 +60,6 @@ export const reclassifyBogusLiveSignals = async (): Promise<number> => {
                     [`values.${MIGRATION_KEY}`]: 'true',
                     updatedAt: new Date(),
                 },
-                $setOnInsert: { values: { [MIGRATION_KEY]: 'true' } },
             },
             { upsert: true }
         );

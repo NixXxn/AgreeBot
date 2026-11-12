@@ -65,11 +65,16 @@ case "$MONGO_URI" in
 esac
 export MONGO_URI
 # polygon-rpc.com is dead (401); default to a working public Polygon RPC
-RPC_URL="$(strip_q "${RPC_URL:-https://polygon-bor-rpc.publicnode.com}")"
+RPC_URL="$(strip_q "${RPC_URL:-https://1rpc.io/matic}")"
 if [ -z "$RPC_URL" ]; then
-  RPC_URL="https://polygon-bor-rpc.publicnode.com"
+  RPC_URL="https://1rpc.io/matic"
 fi
 export RPC_URL
+case "$RPC_URL" in
+  *publicnode.com*)
+    echo "⚠ RPC_URL is publicnode — receipt/archive calls may 403. Prefer Alchemy/Infura/1rpc for redeems."
+    ;;
+esac
 CLOB_HTTP_URL="$(strip_q "${CLOB_HTTP_URL:-https://clob.polymarket.com/}")"
 CLOB_WS_URL="$(strip_q "${CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}")"
 USDC_CONTRACT_ADDRESS="$(strip_q "${USDC_CONTRACT_ADDRESS:-0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174}")"

@@ -90,8 +90,8 @@ if (!process.env.USDC_CONTRACT_ADDRESS) {
     process.env.USDC_CONTRACT_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 }
 if (!process.env.RPC_URL) {
-    // polygon-rpc.com returns 401 (tenant disabled) — use a working public endpoint
-    process.env.RPC_URL = 'https://polygon-bor-rpc.publicnode.com';
+    // Prefer 1rpc — publicnode often 403s eth_getTransactionReceipt (archive token)
+    process.env.RPC_URL = 'https://1rpc.io/matic';
 }
 
 /**

@@ -276,7 +276,8 @@ const redeemPosition = async (position: Position): Promise<{ success: boolean; e
 
         Logger.info(`   ⏳ TX submitted: ${tx.hash}`);
 
-        const receipt = await tx.wait();
+        const { waitForTxReceipt } = await import('../utils/rpcProvider');
+        const receipt = await waitForTxReceipt(provider!, tx.hash);
 
         if (receipt.status === 1) {
             const gasCost = ethers.utils.formatUnits(
