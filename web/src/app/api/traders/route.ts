@@ -158,7 +158,7 @@ export async function GET(request: Request) {
           traders: live,
           source: 'live-data-api',
           message:
-            'Live Polymarket stats for wallets in Settings / USER_ADDRESSES (newest ~300 trades each).',
+            'Live Polymarket stats for Settings / USER_ADDRESSES — trade history is merged in Mongo and kept across refreshes.',
         });
       } catch (error) {
         console.error('Live trader stats failed:', error);

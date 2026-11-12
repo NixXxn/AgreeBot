@@ -124,11 +124,11 @@ export async function loadAllSignals(): Promise<LedgerSignal[]> {
   try {
     const db = await getDb();
     if (db) {
+      // No row cap — My Trades / ledger must keep full history
       fromMongo = (await db
         .collection('bot_signals')
         .find({})
         .sort({ createdAt: -1 })
-        .limit(5000)
         .toArray()) as unknown as LedgerSignal[];
     }
   } catch (error) {

@@ -228,7 +228,7 @@ function TradesList({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedTrades.slice(0, 50).map((trade, idx) => {
+          {sortedTrades.map((trade, idx) => {
             const wallets =
               trade.agreeingTraders && trade.agreeingTraders.length > 0
                 ? trade.agreeingTraders
