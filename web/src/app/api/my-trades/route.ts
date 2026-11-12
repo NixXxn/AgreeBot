@@ -94,16 +94,6 @@ async function fetchJson(url: string): Promise<unknown> {
   return payload;
 }
 
-function toUnixSeconds(raw: unknown): number {
-  if (typeof raw === 'string' && raw.includes('T')) {
-    const ms = Date.parse(raw);
-    return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0;
-  }
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
-}
-
 function shortLabel(address: string): string {
   if (!address || address.length < 10) return address || 'unknown';
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -136,34 +126,18 @@ type WalletPosition = {
 };
 
 async function fetchWalletActivity(address: string): Promise<WalletActivity[]> {
-  const rows: WalletActivity[] = [];
-  const pageSize = 100;
-  const maxPages = 50; // up to 5k fills
-  for (let page = 0; page < maxPages; page++) {
-    const offset = page * pageSize;
-    const url = `https://data-api.polymarket.com/v2/activity?user=${address}&limit=${pageSize}&offset=${offset}`;
-    const chunk = unwrapData(await fetchJson(url));
-    if (chunk.length === 0) break;
-
-    for (const row of chunk) {
-      const type = String(row.type ?? 'TRADE').toUpperCase();
-      if (type && type !== 'TRADE' && type !== 'ORDER_FILLED') continue;
-      const side =
-        String(row.side ?? 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-      rows.push({
-        timestamp: toUnixSeconds(row.timestamp ?? row.block_timestamp),
-        side,
-        usdcSize: Number(row.usdc_size ?? row.usdcSize ?? 0),
-        price: Number(row.price ?? 0),
-        title: String(row.title ?? ''),
-        outcome: String(row.outcome ?? ''),
-        conditionId: String(row.condition_id ?? row.conditionId ?? ''),
-        asset: String(row.token_id ?? row.tokenId ?? row.asset ?? ''),
-      });
-    }
-    if (chunk.length < pageSize) break;
-  }
-  return rows.sort((a, b) => a.timestamp - b.timestamp);
+  const { fetchActivityCursor } = await import('@/lib/polymarketActivity');
+  const rows = await fetchActivityCursor(address, { limit: 100, maxPages: 50 });
+  return rows.map((row) => ({
+    timestamp: row.timestamp,
+    side: row.side,
+    usdcSize: row.usdcSize,
+    price: row.price,
+    title: row.title,
+    outcome: row.outcome,
+    conditionId: row.conditionId,
+    asset: row.asset,
+  }));
 }
 
 async function fetchPositions(address: string): Promise<WalletPosition[]> {

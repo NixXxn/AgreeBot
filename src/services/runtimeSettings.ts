@@ -151,21 +151,23 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
 
         // Baseline fingerprint on first boot. Only overwrite Mongo when Coolify itself changes —
         // dashboard Settings owns paper/live after that.
+        // Use dotted paths only — never $set `values` + $setOnInsert `values` (Mongo conflict).
         if (prevFp === undefined) {
-            if (raw !== '' && existing.PAPER_MODE === undefined && existing.PREVIEW_MODE === undefined) {
-                existing.PAPER_MODE = paperOn ? 'true' : 'false';
-                existing.PREVIEW_MODE = existing.PAPER_MODE;
+            const setDoc: Record<string, unknown> = {
+                coolifyPaperModeFp: fp,
+                updatedAt: new Date(),
+            };
+            if (
+                raw !== '' &&
+                existing.PAPER_MODE === undefined &&
+                existing.PREVIEW_MODE === undefined
+            ) {
+                setDoc['values.PAPER_MODE'] = paperOn ? 'true' : 'false';
+                setDoc['values.PREVIEW_MODE'] = paperOn ? 'true' : 'false';
             }
             await RuntimeSettings.findByIdAndUpdate(
                 RUNTIME_SETTINGS_ID,
-                {
-                    $set: {
-                        ...(Object.keys(existing).length > 0 ? { values: existing } : {}),
-                        coolifyPaperModeFp: fp,
-                        updatedAt: new Date(),
-                    },
-                    $setOnInsert: { values: existing },
-                },
+                { $set: setDoc },
                 { upsert: true }
             );
             return;
@@ -173,14 +175,12 @@ const syncCoolifyPaperMode = async (): Promise<void> => {
 
         if (prevFp === fp) return;
 
-        existing.PAPER_MODE = paperOn ? 'true' : 'false';
-        existing.PREVIEW_MODE = existing.PAPER_MODE;
-
         await RuntimeSettings.findByIdAndUpdate(
             RUNTIME_SETTINGS_ID,
             {
                 $set: {
-                    values: existing,
+                    'values.PAPER_MODE': paperOn ? 'true' : 'false',
+                    'values.PREVIEW_MODE': paperOn ? 'true' : 'false',
                     coolifyPaperModeFp: fp,
                     updatedAt: new Date(),
                 },

@@ -1,10 +1,10 @@
 import type { DailyStats, MonthlyStats, TraderAnalysis } from '@/types/trader';
 import { getDb } from './mongo';
+import { fetchActivityCursor } from './polymarketActivity';
 
 const DATA_API_V2 = 'https://data-api.polymarket.com/v2';
-const ACTIVITY_PAGE = 100;
-/** Hard ceiling per wallet so a bad API can't loop forever (100 × 500 = 50k trades). */
-const MAX_ACTIVITY_PAGES = 500;
+/** Hard ceiling per wallet so a bad API can't loop forever. */
+const MAX_ACTIVITY_PAGES = 100;
 const CONCURRENCY = 4;
 const ACTIVITY_COLLECTION = 'trader_activity';
 const STATS_COLLECTION = 'trader_stats_cache';
@@ -30,17 +30,6 @@ function num(v: unknown, fallback = 0): number {
 
 function str(v: unknown, fallback = ''): string {
   return v === null || v === undefined ? fallback : String(v);
-}
-
-/** Normalize unix seconds / ms / ISO into unix seconds. */
-function toUnixSeconds(raw: unknown): number {
-  if (typeof raw === 'string' && raw.includes('T')) {
-    const ms = Date.parse(raw);
-    return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0;
-  }
-  const n = num(raw);
-  if (!n) return 0;
-  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
 }
 
 function shortLabel(address: string): string {
@@ -69,7 +58,11 @@ async function fetchJson(url: string): Promise<unknown> {
     throw new Error(`Bad JSON from ${url} (${response.status})`);
   }
   if (!response.ok) {
-    throw new Error(`Data API ${response.status} for ${url}`);
+    const errMsg =
+      payload && typeof payload === 'object' && 'error' in (payload as object)
+        ? String((payload as { error: unknown }).error)
+        : `HTTP ${response.status}`;
+    throw new Error(`Data API ${response.status} for ${url}: ${errMsg}`);
   }
   return payload;
 }
@@ -99,21 +92,6 @@ type PositionRow = {
 
 function activityKey(row: ActivityRow): string {
   return `${row.timestamp}|${row.asset}|${row.side}|${row.usdcSize}|${row.price}`;
-}
-
-function parseActivityRow(row: Json): ActivityRow | null {
-  const type = str(row.type, 'TRADE').toUpperCase();
-  if (type && type !== 'TRADE' && type !== 'ORDER_FILLED') return null;
-  const side = str(row.side, 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-  return {
-    timestamp: toUnixSeconds(row.timestamp ?? row.block_timestamp),
-    side,
-    usdcSize: num(row.usdc_size ?? row.usdcSize),
-    price: num(row.price),
-    asset: str(row.token_id ?? row.tokenId ?? row.asset),
-    title: str(row.title),
-    outcome: str(row.outcome),
-  };
 }
 
 async function loadStoredActivity(address: string): Promise<ActivityRow[]> {
@@ -186,38 +164,38 @@ async function saveCachedStats(report: TraderAnalysis): Promise<void> {
 }
 
 /**
- * Pull Data API activity (newest first), merge with Mongo history, never drop old rows.
- * Stops paging early once a full page is already known (overlap with stored history).
+ * Pull Data API activity (cursor pages), merge with Mongo history, never drop old rows.
+ * Stops early once a fetched page adds nothing new (overlap with stored history).
  */
 async function fetchAndMergeActivity(address: string): Promise<ActivityRow[]> {
   const stored = await loadStoredActivity(address);
   const byKey = new Map<string, ActivityRow>();
   for (const row of stored) byKey.set(activityKey(row), row);
 
-  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
-    const offset = page * ACTIVITY_PAGE;
-    const url = `${DATA_API_V2}/activity?user=${address}&limit=${ACTIVITY_PAGE}&offset=${offset}`;
-    const chunk = unwrapList(await fetchJson(url));
-    if (chunk.length === 0) break;
+  // First pass: enough pages to catch up; if store empty, pull a deep history once
+  const maxPages = stored.length > 0 ? Math.min(10, MAX_ACTIVITY_PAGES) : MAX_ACTIVITY_PAGES;
+  const fresh = await fetchActivityCursor(address, { limit: 100, maxPages });
 
-    let newOnPage = 0;
-    for (const raw of chunk) {
-      const row = parseActivityRow(raw);
-      if (!row || !row.timestamp) continue;
-      const key = activityKey(row);
-      if (!byKey.has(key)) {
-        byKey.set(key, row);
-        newOnPage++;
-      }
+  let newCount = 0;
+  for (const row of fresh) {
+    const mapped: ActivityRow = {
+      timestamp: row.timestamp,
+      side: row.side,
+      usdcSize: row.usdcSize,
+      price: row.price,
+      asset: row.asset,
+      title: row.title,
+      outcome: row.outcome,
+    };
+    const key = activityKey(mapped);
+    if (!byKey.has(key)) {
+      byKey.set(key, mapped);
+      newCount++;
     }
-
-    // Entire page already in Mongo → older pages are already stored
-    if (stored.length > 0 && newOnPage === 0) break;
-    if (chunk.length < ACTIVITY_PAGE) break;
   }
 
   const merged = Array.from(byKey.values()).sort((a, b) => a.timestamp - b.timestamp);
-  if (merged.length > stored.length) {
+  if (newCount > 0 || merged.length > stored.length) {
     await saveStoredActivity(address, merged);
   }
   return merged;
