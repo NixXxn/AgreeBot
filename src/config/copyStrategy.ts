@@ -198,10 +198,24 @@ export function calculateOrderSize(
     }
 
     // Step 5: Check minimum order size
-    if (finalAmount < config.minOrderSizeUSD) {
+    // Kelly can size under Polymarket's $1 floor on small bankrolls — raise to min when
+    // there is still edge (finalAmount > 0) and the wallet can afford it.
+    if (finalAmount > 0 && finalAmount < config.minOrderSizeUSD) {
+        if (
+            config.strategy === CopyStrategy.KELLY &&
+            maxAffordable >= config.minOrderSizeUSD
+        ) {
+            finalAmount = config.minOrderSizeUSD;
+            reasoning += ` → Raised to market minimum $${config.minOrderSizeUSD}`;
+        } else {
+            belowMinimum = true;
+            reasoning += ` → Below minimum $${config.minOrderSizeUSD}`;
+            finalAmount = 0;
+        }
+    } else if (finalAmount < config.minOrderSizeUSD) {
         belowMinimum = true;
         reasoning += ` → Below minimum $${config.minOrderSizeUSD}`;
-        finalAmount = 0; // Don't execute
+        finalAmount = 0;
     }
 
     return {

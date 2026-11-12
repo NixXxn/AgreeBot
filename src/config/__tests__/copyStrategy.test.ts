@@ -96,6 +96,24 @@ describe('calculateOrderSize', () => {
             );
             expect(full.finalAmount).toBeCloseTo(half.finalAmount * 2, 4);
         });
+
+        it('raises sub-minimum Kelly size to market minimum when affordable', () => {
+            // Same shape as production: tiny bankroll → Kelly << $1
+            const result = calculateOrderSize(kellyConfig, 6.83, 5, 0, {
+                marketPrice: 0.361,
+            });
+            expect(result.finalAmount).toBe(1.0);
+            expect(result.belowMinimum).toBe(false);
+            expect(result.reasoning).toMatch(/Raised to market minimum/i);
+        });
+
+        it('does not raise Kelly when balance cannot cover the minimum', () => {
+            const result = calculateOrderSize(kellyConfig, 6.83, 0.5, 0, {
+                marketPrice: 0.361,
+            });
+            expect(result.finalAmount).toBe(0);
+            expect(result.belowMinimum).toBe(true);
+        });
     });
 
     describe('FIXED strategy', () => {
