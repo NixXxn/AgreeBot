@@ -26,6 +26,11 @@ type ViewMode = 'traders' | 'my-trades' | 'settings';
 export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('traders');
   const [traders, setTraders] = useState<TraderAnalysis[]>([]);
+  const [tradersMeta, setTradersMeta] = useState<{
+    message?: string;
+    balanceUsd?: number;
+    paperMode?: boolean;
+  }>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +58,12 @@ export default function Home() {
       }
 
       setTraders(data.traders);
+      setTradersMeta({
+        message: data.message,
+        balanceUsd:
+          typeof data.balanceUsd === 'number' ? data.balanceUsd : undefined,
+        paperMode: Boolean(data.paperMode),
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -108,8 +119,11 @@ export default function Home() {
       case 'traders':
         return (
           <>
-            Analyzing {traders.length} traders | Last updated:{' '}
-            {traders[0]?.analysisDate?.split('T')[0] || 'N/A'}
+            Bot-copy stats for {traders.length} wallets
+            {typeof tradersMeta.balanceUsd === 'number'
+              ? ` · balance $${tradersMeta.balanceUsd.toFixed(2)}`
+              : ''}
+            {tradersMeta.paperMode ? ' · paper' : ' · live'}
           </>
         );
       case 'my-trades':
@@ -184,6 +198,53 @@ export default function Home() {
               />
               <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
             </div>
+
+            {tradersMeta.message && (
+              <p className="text-sm text-muted-foreground mb-4">{tradersMeta.message}</p>
+            )}
+
+            {typeof tradersMeta.balanceUsd === 'number' && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div className="bg-card rounded-lg p-4 border">
+                  <p className="text-sm text-muted-foreground">Balance (CLOB)</p>
+                  <p className="text-2xl font-bold">
+                    ${tradersMeta.balanceUsd.toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-card rounded-lg p-4 border">
+                  <p className="text-sm text-muted-foreground">Bot P/L (all copies)</p>
+                  <p
+                    className={`text-2xl font-bold ${
+                      traders.reduce((s, t) => s + t.pnl.total, 0) >= 0
+                        ? 'text-green-500'
+                        : 'text-red-500'
+                    }`}
+                  >
+                    {traders.reduce((s, t) => s + t.pnl.total, 0) >= 0 ? '+' : ''}
+                    ${traders.reduce((s, t) => s + t.pnl.total, 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-card rounded-lg p-4 border">
+                  <p className="text-sm text-muted-foreground">Bot volume bought</p>
+                  <p className="text-2xl font-bold">
+                    $
+                    {traders
+                      .reduce((s, t) => s + t.volume.totalBought, 0)
+                      .toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-card rounded-lg p-4 border">
+                  <p className="text-sm text-muted-foreground">Wallets with fills</p>
+                  <p className="text-2xl font-bold">
+                    {traders.filter((t) => t.trades.total > 0).length}
+                    <span className="text-sm text-muted-foreground font-normal">
+                      {' '}
+                      / {traders.length}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Hero Section - Bento Grid */}
             <div className="grid grid-cols-12 gap-3 mb-6" style={{ minHeight: '320px' }}>

@@ -3,11 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   getConfiguredTraderAddresses,
+  getRuntimeOverrides,
   normalizeTraderAddresses,
 } from '@/lib/runtimeSettings';
 import { getUserAddressesFromEnv } from '@/lib/mongo';
 import { stripQuotes } from '@/lib/env';
-import { buildLiveTraderReports } from '@/lib/liveTraderStats';
+import { buildBotCopyTraderAnalyses } from '@/lib/botAnalytics';
+import {
+  fetchBotClobBalance,
+  resolvePaperModeAsync,
+} from '@/lib/botMode';
 import type { TraderAnalysis } from '@/types/trader';
 
 export const dynamic = 'force-dynamic';
@@ -80,32 +85,9 @@ function placeholderTrader(address: string): TraderAnalysis {
   };
 }
 
-function alignToConfigured(
-  reports: TraderAnalysis[],
-  configured: string[]
-): TraderAnalysis[] {
-  if (configured.length === 0) return [];
-  const byAddr = new Map(
-    reports.map((t) => [t.address.toLowerCase(), t] as const)
-  );
-  return configured.map(
-    (addr) => byAddr.get(addr.toLowerCase()) || placeholderTrader(addr)
-  );
-}
-
-function reportsLookPopulated(reports: TraderAnalysis[]): boolean {
-  return reports.some(
-    (t) =>
-      t.trades.total > 0 ||
-      t.positions.total > 0 ||
-      Math.abs(t.pnl.total) > 0 ||
-      t.volume.totalBought > 0
-  );
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const forceLive = searchParams.get('refresh') === 'true';
+  const refresh = searchParams.get('refresh') === 'true';
 
   try {
     const envAddresses = parseUserAddressesFromEnv();
@@ -113,78 +95,54 @@ export async function GET(request: Request) {
       envAddresses.length > 0 ? envAddresses : getUserAddressesFromEnv()
     );
 
-    const reportsDir = path.join(process.cwd(), '..', 'trader_reports');
-    const summaryPath = path.join(reportsDir, '_SUMMARY.json');
+    const overrides = await getRuntimeOverrides().catch(() => ({}));
+    const mode = await resolvePaperModeAsync(overrides);
 
-    let fileReports: TraderAnalysis[] = [];
-
-    if (!forceLive && fs.existsSync(summaryPath)) {
-      try {
-        fileReports = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as TraderAnalysis[];
-      } catch {
-        fileReports = [];
-      }
-    } else if (!forceLive && fs.existsSync(reportsDir)) {
-      const files = fs.readdirSync(reportsDir);
-      const jsonFiles = files.filter((f) => f.endsWith('.json') && !f.startsWith('_'));
-      for (const file of jsonFiles) {
-        try {
-          fileReports.push(
-            JSON.parse(fs.readFileSync(path.join(reportsDir, file), 'utf-8')) as TraderAnalysis
-          );
-        } catch {
-          /* skip bad file */
-        }
-      }
+    let balanceUsd: number | null = null;
+    try {
+      const clob = await fetchBotClobBalance();
+      if (clob && Number.isFinite(clob.usdc)) balanceUsd = clob.usdc;
+    } catch {
+      /* optional */
     }
 
-    if (configured.length > 0 && fileReports.length > 0) {
-      const aligned = alignToConfigured(fileReports, configured);
-      if (reportsLookPopulated(aligned)) {
-        return NextResponse.json({
-          traders: aligned,
-          source: 'reports+settings',
-        });
-      }
-    } else if (configured.length === 0 && fileReports.length > 0 && reportsLookPopulated(fileReports)) {
-      return NextResponse.json({ traders: fileReports, source: 'reports' });
+    if (configured.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'No traders configured. Add wallets in Settings or set USER_ADDRESSES.',
+        },
+        { status: 404 }
+      );
     }
 
-    // No usable offline reports — Mongo cache first, Data API only for stale/missing
-    if (configured.length > 0) {
-      try {
-        const live = await buildLiveTraderReports(configured, {
-          forceRefresh: forceLive,
-        });
-        return NextResponse.json({
-          traders: live.traders,
-          source: live.source,
-          refreshed: live.refreshed,
-          cached: live.cached,
-          message: live.message,
-        });
-      } catch (error) {
-        console.error('Live trader stats failed:', error);
-        return NextResponse.json({
-          traders: configured.map(placeholderTrader),
-          source: 'settings',
-          message:
-            'Could not fetch live trader stats. Showing wallet list only — retry refresh.',
-        });
-      }
-    }
+    // Bot-copy attribution only — never Polymarket Data API trader histories
+    const { traders, message } = await buildBotCopyTraderAnalyses({
+      paperMode: mode.paperMode,
+      configuredAddresses: configured,
+    });
 
-    return NextResponse.json(
-      {
-        error:
-          'No traders configured. Add wallets in Settings or set USER_ADDRESSES.',
-      },
-      { status: 404 }
+    // Ensure every configured wallet appears (zeros if no bot fills yet)
+    const byAddr = new Map(traders.map((t) => [t.address.toLowerCase(), t]));
+    const aligned = configured.map(
+      (addr) => byAddr.get(addr.toLowerCase()) || placeholderTrader(addr)
     );
+
+    return NextResponse.json({
+      traders: aligned,
+      source: 'bot-ledger',
+      paperMode: mode.paperMode,
+      modeSource: mode.source,
+      balanceUsd,
+      refreshed: refresh,
+      message:
+        message +
+        (balanceUsd != null ? ` · balance $${balanceUsd.toFixed(2)}` : ''),
+    });
   } catch (error) {
-    console.error('Error reading trader reports:', error);
+    console.error('Error building bot trader analytics:', error);
     return NextResponse.json(
-      { error: 'Failed to read trader reports' },
+      { error: 'Failed to build bot trader analytics' },
       { status: 500 }
     );
   }

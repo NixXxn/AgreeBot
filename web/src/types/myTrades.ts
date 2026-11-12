@@ -54,4 +54,6 @@ export interface MyTradesResponse {
   cacheDate?: string;
   paperMode?: boolean;
   message?: string;
+  /** Current trading balance (CLOB USDC) when available */
+  balanceUsd?: number;
 }

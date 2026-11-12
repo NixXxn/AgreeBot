@@ -257,6 +257,10 @@ export function MyTradesView() {
         </div>
       </Card>
 
+      {data?.message && (
+        <p className="text-sm text-muted-foreground mb-4">{data.message}</p>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
         <div className="bg-card rounded-lg p-4 border">
@@ -268,18 +272,23 @@ export function MyTradesView() {
           </p>
         </div>
         <div className="bg-card rounded-lg p-4 border">
-          <p className="text-sm text-muted-foreground">Total Trades (filtered)</p>
+          <p className="text-sm text-muted-foreground">Balance (CLOB)</p>
+          <p className="text-2xl font-bold">
+            {typeof data?.balanceUsd === 'number'
+              ? `$${data.balanceUsd.toFixed(2)}`
+              : '—'}
+          </p>
+        </div>
+        <div className="bg-card rounded-lg p-4 border">
+          <p className="text-sm text-muted-foreground">Bot trades (filtered)</p>
           <p className="text-2xl font-bold">{filteredData.summary.totalTrades}</p>
         </div>
         <div className="bg-card rounded-lg p-4 border">
-          <p className="text-sm text-muted-foreground">Total Bought</p>
+          <p className="text-sm text-muted-foreground">Bot bought</p>
           <p className="text-2xl font-bold">${filteredData.summary.totalBought.toFixed(2)}</p>
-        </div>
-        <div className="bg-card rounded-lg p-4 border">
-          <p className="text-sm text-muted-foreground">Match Rate</p>
-          <p className="text-2xl font-bold">{matchRate.toFixed(1)}%</p>
           <p className="text-xs text-muted-foreground">
-            {filteredData.summary.matchedTrades} / {filteredData.summary.totalTrades}
+            Match {matchRate.toFixed(0)}% · {filteredData.summary.matchedTrades}/
+            {filteredData.summary.totalTrades}
           </p>
         </div>
       </div>
