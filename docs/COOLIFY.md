@@ -83,6 +83,8 @@ MONGO_URI=mongodb://user:pass@mongodb:27017/polymarket_copytrading
 
 Use the internal hostname Coolify assigns to that resource.
 
+> **Port gotcha:** If you publish Mongo on a custom host port (`MONGO_PORT=27018`), keep **`27017` in `MONGO_URI`**. The publish port is host-only; inside the Docker/Coolify network Mongo still listens on `27017`. `mongodb://mongodb:27018/...` → `ECONNREFUSED`.
+
 ## 4. Deploy
 
 1. Save env vars  

@@ -52,6 +52,18 @@ export POLY_PRIVATE_KEY POLY_FUNDER POLY_SIGNATURE_TYPE
 export RELAYER_API_KEY RELAYER_API_KEY_ADDRESS
 export DASHBOARD_USER DASHBOARD_TOKEN
 MONGO_URI="$(strip_q "${MONGO_URI:-}")"
+# Docker service hostname always reaches Mongo on container port 27017.
+# Coolify users often put MONGO_PORT (host publish) into MONGO_URI — fix that.
+case "$MONGO_URI" in
+  mongodb://mongodb:*|mongodb://agreebot-mongodb:*)
+    FIXED_URI="$(printf '%s' "$MONGO_URI" | sed -E 's#(mongodb://(mongodb|agreebot-mongodb)):([0-9]+)#\1:27017#')"
+    if [ "$FIXED_URI" != "$MONGO_URI" ]; then
+      echo "⚠ MONGO_URI used a non-27017 port for the mongodb service — rewriting to :27017 (host MONGO_PORT is publish-only)"
+      MONGO_URI="$FIXED_URI"
+    fi
+    ;;
+esac
+export MONGO_URI
 # polygon-rpc.com is dead (401); default to a working public Polygon RPC
 RPC_URL="$(strip_q "${RPC_URL:-https://polygon-bor-rpc.publicnode.com}")"
 if [ -z "$RPC_URL" ]; then
