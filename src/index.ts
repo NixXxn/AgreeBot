@@ -120,6 +120,9 @@ export const main = async () => {
         const { primeHistoricalTrades } = await import('./services/tradeMonitor');
         await primeHistoricalTrades();
 
+        const { clearAllPendingConsensus } = await import('./services/consensus');
+        await clearAllPendingConsensus();
+
         Logger.info('Starting trade monitor...');
         tradeMonitor();
 

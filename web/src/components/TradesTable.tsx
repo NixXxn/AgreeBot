@@ -12,12 +12,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { BotTradeRow, TradesResponse } from '@/types/trades';
+import type { BotTradeRow, PendingConsensusRow, TradesResponse } from '@/types/trades';
 
 type FilterMode = 'all' | 'entered' | 'skipped';
 
 export function TradesTable() {
   const [trades, setTrades] = useState<BotTradeRow[]>([]);
+  const [pending, setPending] = useState<PendingConsensusRow[]>([]);
   const [summary, setSummary] = useState<TradesResponse['summary']>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,6 +38,7 @@ export function TradesTable() {
       }
 
       setTrades(Array.isArray(data.trades) ? data.trades : []);
+      setPending(Array.isArray(data.pendingConsensus) ? data.pendingConsensus : []);
       setSummary(data.summary);
       setError(data.error || null);
     } catch (err) {
@@ -49,9 +51,19 @@ export function TradesTable() {
 
   useEffect(() => {
     fetchTrades();
-    const id = setInterval(() => fetchTrades(true), 60_000);
+    // Faster while groups are open so the waiting board stays live
+    const id = setInterval(() => fetchTrades(true), 15_000);
     return () => clearInterval(id);
   }, [fetchTrades]);
+
+  const formatAge = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    if (m < 60) return `${m}m ${s}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  };
 
   const filtered = trades.filter((t) => {
     if (filterMode === 'entered') return t.entered;
@@ -92,6 +104,14 @@ export function TradesTable() {
             </CardTitle>
             {summary && (
               <p className="text-sm text-muted-foreground mt-1">
+                {pending.length > 0 && (
+                  <>
+                    <span className="text-amber-500 font-medium">
+                      {pending.length} waiting
+                    </span>
+                    {' · '}
+                  </>
+                )}
                 {summary.entered} entered · {summary.skipped} skipped
                 {summary.entered > 0 && (
                   <>
@@ -147,16 +167,67 @@ export function TradesTable() {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
+        {!loading && pending.length > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-2">
+              Waiting for agreement ({pending.length})
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Market</TableHead>
+                  <TableHead>Side</TableHead>
+                  <TableHead className="text-right">Progress</TableHead>
+                  <TableHead>Traders</TableHead>
+                  <TableHead className="text-right">Age</TableHead>
+                  <TableHead className="text-right">Window</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pending.map((g) => (
+                  <TableRow key={g.id}>
+                    <TableCell className="max-w-[220px]">
+                      <div className="font-medium truncate" title={g.title || g.slug}>
+                        {g.title || g.slug || g.conditionId.slice(0, 12) || '—'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {g.outcome || '—'}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={g.side === 'BUY' ? 'success' : 'warning'}>
+                        {g.side}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-amber-500">
+                      {g.traders}/{g.required}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {g.agreeingTraders.map(shortAddr).join(', ') || '—'}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {formatAge(g.ageSeconds)}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {formatAge(g.windowSeconds)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
         {loading ? (
           <p className="text-center text-muted-foreground py-8">Loading trades…</p>
-        ) : error && filtered.length === 0 ? (
+        ) : error && filtered.length === 0 && pending.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">
-            No bot trades yet. Entries accumulate in Mongo + a file ledger when
-            consensus fires or expires — they are not cleared when new ones arrive.
-            Full stats live under My Trades.
+            {pending.length > 0
+              ? 'No finished bot trades yet — open consensus groups are listed above. Rows appear here when consensus fires or expires.'
+              : 'No bot trades yet. Entries appear when consensus fires or expires (not on every monitored trader fill). Full stats live under My Trades.'}
           </p>
         ) : (
           <Table>

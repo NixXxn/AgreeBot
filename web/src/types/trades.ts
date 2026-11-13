@@ -21,8 +21,25 @@ export interface BotTradeRow {
   resolved?: boolean;
 }
 
+export interface PendingConsensusRow {
+  id: string;
+  conditionId: string;
+  asset: string;
+  side: string;
+  outcome?: string;
+  title?: string;
+  slug?: string;
+  traders: number;
+  required: number;
+  agreeingTraders: string[];
+  firstTradeAt: number;
+  ageSeconds: number;
+  windowSeconds: number;
+}
+
 export interface TradesResponse {
   trades: BotTradeRow[];
+  pendingConsensus?: PendingConsensusRow[];
   summary?: {
     total: number;
     entered: number;
@@ -31,6 +48,7 @@ export interface TradesResponse {
     paper: boolean;
     resolved?: number;
     limit?: number;
+    pendingGroups?: number;
   };
   paperMode?: boolean;
   error?: string;

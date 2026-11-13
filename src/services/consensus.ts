@@ -1,5 +1,6 @@
 import { UserActivityInterface } from '../interfaces/User';
 import { ENV } from '../config/env';
+import { ConsensusPending } from '../models/consensusPending';
 import { getUserActivityModel } from '../models/userHistory';
 import Logger from '../utils/logger';
 import { recordBotSignal } from './botSignals';
@@ -16,6 +17,7 @@ export interface ConsensusGroup {
     asset: string;
     side: string;
     outcome?: string;
+    title?: string;
     slug?: string;
     eventSlug?: string;
     trades: TradeWithUser[];
@@ -55,8 +57,12 @@ export const getConsensusStatus = (): Array<{
     traders: number;
     required: number;
     side: string;
+    outcome?: string;
+    title?: string;
     slug?: string;
+    agreeingTraders: string[];
     ageSeconds: number;
+    windowSeconds: number;
 }> => {
     const now = Date.now();
     return Array.from(consensusBuffer.values()).map((g) => ({
@@ -64,9 +70,73 @@ export const getConsensusStatus = (): Array<{
         traders: g.traderAddresses.size,
         required: ENV.CONSENSUS_MIN_AGREEMENT,
         side: g.side,
+        outcome: g.outcome,
+        title: g.title || g.slug || g.eventSlug,
         slug: g.slug || g.eventSlug,
+        agreeingTraders: Array.from(g.traderAddresses),
         ageSeconds: Math.floor((now - g.firstTradeTime) / 1000),
+        windowSeconds: ENV.CONSENSUS_WINDOW_SECONDS,
     }));
+};
+
+const persistPendingGroup = async (group: ConsensusGroup): Promise<void> => {
+    try {
+        await ConsensusPending.findByIdAndUpdate(
+            group.key,
+            {
+                $set: {
+                    conditionId: group.conditionId,
+                    asset: group.asset,
+                    side: group.side,
+                    outcome: group.outcome,
+                    title: group.title || group.trades[0]?.title,
+                    slug: group.slug,
+                    eventSlug: group.eventSlug,
+                    traders: group.traderAddresses.size,
+                    required: ENV.CONSENSUS_MIN_AGREEMENT,
+                    agreeingTraders: Array.from(group.traderAddresses),
+                    firstTradeAt: Math.floor(group.firstTradeTime / 1000),
+                    updatedAt: new Date(),
+                },
+                $setOnInsert: { _id: group.key },
+            },
+            { upsert: true }
+        );
+    } catch (error) {
+        Logger.warning(
+            `Failed to persist consensus pending: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
+};
+
+const clearPendingGroup = async (key: string): Promise<void> => {
+    try {
+        await ConsensusPending.findByIdAndDelete(key).exec();
+    } catch (error) {
+        Logger.warning(
+            `Failed to clear consensus pending: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
+};
+
+/** Drop stale Mongo pending rows after restart (memory buffer starts empty). */
+export const clearAllPendingConsensus = async (): Promise<void> => {
+    try {
+        const result = await ConsensusPending.deleteMany({});
+        if (result.deletedCount > 0) {
+            Logger.info(`Cleared ${result.deletedCount} stale consensus_pending row(s)`);
+        }
+    } catch (error) {
+        Logger.warning(
+            `Failed to clear consensus_pending: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
 };
 
 const computeSizedUsdc = (trades: TradeWithUser[], mode: ConsensusSizeMode): number => {
@@ -106,6 +176,8 @@ export const addToConsensusBuffer = (trade: TradeWithUser): void => {
     const now = Date.now();
     const addr = trade.userAddress.toLowerCase();
 
+    let group: ConsensusGroup;
+
     if (existing) {
         // Avoid duplicate DB docs
         if (existing.trades.some((t) => String(t._id) === String(trade._id))) {
@@ -117,6 +189,8 @@ export const addToConsensusBuffer = (trade: TradeWithUser): void => {
         if (!existing.slug && trade.slug) existing.slug = trade.slug;
         if (!existing.eventSlug && trade.eventSlug) existing.eventSlug = trade.eventSlug;
         if (!existing.outcome && trade.outcome) existing.outcome = trade.outcome;
+        if (!existing.title && trade.title) existing.title = trade.title;
+        group = existing;
 
         Logger.info(
             `Consensus [${existing.traderAddresses.size}/${ENV.CONSENSUS_MIN_AGREEMENT}] ` +
@@ -125,19 +199,21 @@ export const addToConsensusBuffer = (trade: TradeWithUser): void => {
                 `on ${trade.slug || trade.eventSlug || 'market'}`
         );
     } else {
-        consensusBuffer.set(key, {
+        group = {
             key,
             conditionId: trade.conditionId,
             asset: trade.asset,
             side: (trade.side || 'BUY').toUpperCase(),
             outcome: trade.outcome,
+            title: trade.title,
             slug: trade.slug,
             eventSlug: trade.eventSlug,
             trades: [trade],
             traderAddresses: new Set([addr]),
             firstTradeTime: now,
             lastTradeTime: now,
-        });
+        };
+        consensusBuffer.set(key, group);
 
         Logger.info(
             `Consensus started [1/${ENV.CONSENSUS_MIN_AGREEMENT}] ` +
@@ -145,6 +221,8 @@ export const addToConsensusBuffer = (trade: TradeWithUser): void => {
                 `waiting up to ${ENV.CONSENSUS_WINDOW_SECONDS}s for agreement`
         );
     }
+
+    void persistPendingGroup(group);
 };
 
 /**
@@ -239,6 +317,7 @@ export const evaluateConsensusBuffer = async (): Promise<{
             const readyTrade = buildReadyTrade(group);
             ready.push(readyTrade);
             consensusBuffer.delete(key);
+            await clearPendingGroup(key);
 
             Logger.success(
                 `Consensus reached! ${uniqueCount} traders agree on ` +
@@ -274,7 +353,7 @@ export const evaluateConsensusBuffer = async (): Promise<{
                 conditionId: group.conditionId,
                 asset: group.asset,
                 side: (group.side || 'BUY').toUpperCase() as 'BUY' | 'SELL',
-                title: ref?.title,
+                title: ref?.title || group.title,
                 slug: group.slug || ref?.slug,
                 eventSlug: group.eventSlug || ref?.eventSlug,
                 outcome: group.outcome || ref?.outcome,
@@ -289,6 +368,7 @@ export const evaluateConsensusBuffer = async (): Promise<{
             });
 
             consensusBuffer.delete(key);
+            await clearPendingGroup(key);
             expiredCount++;
         }
     }
