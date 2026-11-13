@@ -323,22 +323,29 @@ const postOrder = async (
             }, orderBook.asks[0]);
 
             const askPrice = parseFloat(minPriceAsk.price);
-            const slip = slippageFraction();
-            const minAsk = refPrice * (1 - slip);
-            const maxAsk = refPrice * (1 + slip);
-            Logger.info(
-                `Best ask: ${minPriceAsk.size} @ $${askPrice.toFixed(4)} | ` +
-                    `ref buy $${refPrice.toFixed(4)} | ` +
-                    `allowed ±${(slip * 100).toFixed(0)}% [$${minAsk.toFixed(4)} … $${maxAsk.toFixed(4)}]`
-            );
-            if (!(askPrice >= minAsk && askPrice <= maxAsk)) {
-                Logger.warning(
-                    `Price slippage too high - skipping trade ` +
-                        `(ask $${askPrice.toFixed(4)} outside ±${(slip * 100).toFixed(0)}% of ` +
-                        `ref buy $${refPrice.toFixed(4)})`
+            if (ENV.SKIP_PRICE_SLIPPAGE) {
+                Logger.info(
+                    `Best ask: ${minPriceAsk.size} @ $${askPrice.toFixed(4)} | ` +
+                        `ref buy $${refPrice.toFixed(4)} | slippage check skipped`
                 );
-                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-                break;
+            } else {
+                const slip = slippageFraction();
+                const minAsk = refPrice * (1 - slip);
+                const maxAsk = refPrice * (1 + slip);
+                Logger.info(
+                    `Best ask: ${minPriceAsk.size} @ $${askPrice.toFixed(4)} | ` +
+                        `ref buy $${refPrice.toFixed(4)} | ` +
+                        `allowed ±${(slip * 100).toFixed(0)}% [$${minAsk.toFixed(4)} … $${maxAsk.toFixed(4)}]`
+                );
+                if (!(askPrice >= minAsk && askPrice <= maxAsk)) {
+                    Logger.warning(
+                        `Price slippage too high - skipping trade ` +
+                            `(ask $${askPrice.toFixed(4)} outside ±${(slip * 100).toFixed(0)}% of ` +
+                            `ref buy $${refPrice.toFixed(4)})`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    break;
+                }
             }
 
             // Check if remaining amount is below minimum before creating order

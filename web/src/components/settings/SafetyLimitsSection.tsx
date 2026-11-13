@@ -2,6 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { BotSettings } from '@/types/settings';
 
 interface SafetyLimitsSectionProps {
@@ -10,6 +11,11 @@ interface SafetyLimitsSectionProps {
 }
 
 export function SafetyLimitsSection({ safetyLimits, onChange }: SafetyLimitsSectionProps) {
+  const skipSlippage = Boolean(safetyLimits.skipPriceSlippage);
+  const maxSlippage = Number.isFinite(safetyLimits.maxSlippagePercent)
+    ? safetyLimits.maxSlippagePercent
+    : 15;
+
   return (
     <Card>
       <CardHeader>
@@ -59,11 +65,35 @@ export function SafetyLimitsSection({ safetyLimits, onChange }: SafetyLimitsSect
           />
         </div>
 
+        <div className="border-t border-border pt-4 space-y-4">
+          <Switch
+            checked={skipSlippage}
+            onCheckedChange={(checked) => onChange({ skipPriceSlippage: checked })}
+            label="Skip price slippage check"
+            description="Buy at the best ask even if it is outside ±% of the last agreeing trader’s price"
+          />
+          <Input
+            label="Max Slippage (%)"
+            type="number"
+            step="1"
+            min="1"
+            value={maxSlippage}
+            disabled={skipSlippage}
+            onChange={(e) =>
+              onChange({
+                maxSlippagePercent: Math.max(1, parseFloat(e.target.value) || 15),
+              })
+            }
+          />
+        </div>
+
         <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg space-y-1">
           <p><strong>Max Order Size:</strong> Maximum size for a single order (prevents oversized trades)</p>
           <p><strong>Min Order Size:</strong> Orders below this will be skipped (Polymarket requires $1 min)</p>
           <p><strong>Max Position Size:</strong> Maximum total value in one market</p>
           <p><strong>Max Daily Volume:</strong> Maximum trading volume per day</p>
+          <p><strong>Skip price slippage:</strong> Disables the ±% ask vs last-agreeing-fill band (more fills, worse prices possible)</p>
+          <p><strong>Max Slippage:</strong> Allowed ask band around the reference buy price when slippage check is on</p>
         </div>
       </CardContent>
     </Card>

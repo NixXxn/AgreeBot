@@ -292,6 +292,16 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.AUTO_RESOLVE_ENABLED !== undefined) {
         ENV.AUTO_RESOLVE_ENABLED = overrides.AUTO_RESOLVE_ENABLED === 'true';
     }
+    if (overrides.AUTO_CLAIM_ENABLED !== undefined) {
+        ENV.AUTO_CLAIM_ENABLED = overrides.AUTO_CLAIM_ENABLED !== 'false';
+    }
+    if (overrides.AUTO_CLAIM_INTERVAL) {
+        const n = parseInt(overrides.AUTO_CLAIM_INTERVAL, 10);
+        if (Number.isFinite(n) && n > 0) ENV.AUTO_CLAIM_INTERVAL = n;
+    }
+    if (overrides.AUTO_CLAIM_RECIPIENT !== undefined) {
+        ENV.AUTO_CLAIM_RECIPIENT = (overrides.AUTO_CLAIM_RECIPIENT || '').trim();
+    }
 
     if (overrides.CONSENSUS_MIN_AGREEMENT) {
         ENV.CONSENSUS_MIN_AGREEMENT = parseInt(overrides.CONSENSUS_MIN_AGREEMENT, 10) || 2;
@@ -308,6 +318,11 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.MAX_SLIPPAGE_PERCENT) {
         const slip = parseFloat(overrides.MAX_SLIPPAGE_PERCENT);
         if (Number.isFinite(slip) && slip > 0) ENV.MAX_SLIPPAGE_PERCENT = slip;
+    }
+    if (overrides.SKIP_PRICE_SLIPPAGE !== undefined) {
+        ENV.SKIP_PRICE_SLIPPAGE = ['true', '1', 'yes', 'on'].includes(
+            overrides.SKIP_PRICE_SLIPPAGE.toLowerCase()
+        );
     }
     if (overrides.FETCH_INTERVAL) {
         ENV.FETCH_INTERVAL = parseInt(overrides.FETCH_INTERVAL, 10) || ENV.FETCH_INTERVAL;

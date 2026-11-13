@@ -3,6 +3,7 @@ import { ENV } from './config/env';
 import tradeExecutor, { stopTradeExecutor } from './services/tradeExecutor';
 import tradeMonitor, { stopTradeMonitor } from './services/tradeMonitor';
 import autoResolver, { stopAutoResolver } from './services/autoResolver';
+import autoClaim, { stopAutoClaim } from './services/autoClaim';
 import { startHealthServer, stopHealthServer } from './services/healthServer';
 import { ensureClobClient, getClobClient } from './services/clobClientHolder';
 import Logger from './utils/logger';
@@ -28,6 +29,7 @@ const gracefulShutdown = async (signal: string) => {
         stopTradeMonitor();
         stopTradeExecutor();
         stopAutoResolver();
+        stopAutoClaim();
         await stopHealthServer();
 
         // Give services time to finish current operations
@@ -124,6 +126,17 @@ export const main = async () => {
             autoResolver();
         } else {
             Logger.info('Auto resolver disabled');
+        }
+
+        if (!ENV.PAPER_MODE && ENV.AUTO_CLAIM_ENABLED) {
+            Logger.info('Starting auto claim (live winnings → connected wallet)...');
+            autoClaim();
+        } else {
+            Logger.info(
+                ENV.PAPER_MODE
+                    ? 'Auto claim skipped (paper mode)'
+                    : 'Auto claim disabled (AUTO_CLAIM_ENABLED=false)'
+            );
         }
 
         // Pick up dashboard Settings changes even if the save-time notify missed

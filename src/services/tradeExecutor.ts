@@ -251,7 +251,9 @@ const doConsensusTrading = async (
             `Last agreeing buy: $${ready.lastAgreeingPrice.toFixed(4)} ` +
                 `(${ready.lastAgreeingTrader.slice(0, 6)}…${ready.lastAgreeingTrader.slice(-4)}) | ` +
                 `VWAP $${Number(ready.trade.price).toFixed(4)} | ` +
-                `slippage ±${ENV.MAX_SLIPPAGE_PERCENT}%`
+                (ENV.SKIP_PRICE_SLIPPAGE
+                    ? 'slippage check off'
+                    : `slippage ±${ENV.MAX_SLIPPAGE_PERCENT}%`)
         );
 
         // Mark all contributing trades as being processed

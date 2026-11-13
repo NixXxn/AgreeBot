@@ -27,6 +27,10 @@ export interface BotSettings {
     minOrderSizeUSD: number;
     maxPositionSizeUSD: number | null;
     maxDailyVolumeUSD: number | null;
+    /** When true, BUY orders ignore ±MAX_SLIPPAGE_PERCENT vs ref price. */
+    skipPriceSlippage: boolean;
+    /** Max ±% book vs last agreeing trader fill (ignored if skipPriceSlippage). */
+    maxSlippagePercent: number;
   };
 
   // Adaptive Strategy (only when strategy = ADAPTIVE)

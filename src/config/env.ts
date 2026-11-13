@@ -452,6 +452,15 @@ export const ENV = {
     // Auto-resolve settings (automatically sell positions at 100% or 0%)
     AUTO_RESOLVE_ENABLED: process.env.AUTO_RESOLVE_ENABLED === 'true',
     AUTO_RESOLVE_INTERVAL: parseInt(process.env.AUTO_RESOLVE_INTERVAL || '60', 10), // Check every 60s by default
+    /**
+     * Live-only: when CLOB cash doubles past the ladder baseline, withdraw
+     * (baseline − $50) to the connected wallet (EOA / AUTO_CLAIM_RECIPIENT).
+     * Default on unless explicitly set to false.
+     */
+    AUTO_CLAIM_ENABLED: process.env.AUTO_CLAIM_ENABLED !== 'false',
+    AUTO_CLAIM_INTERVAL: parseInt(process.env.AUTO_CLAIM_INTERVAL || '120', 10),
+    /** Optional payout destination; defaults to signer address from PRIVATE_KEY. */
+    AUTO_CLAIM_RECIPIENT: (process.env.AUTO_CLAIM_RECIPIENT || '').trim(),
     // Consensus / multi-trader agreement settings
     CONSENSUS_ENABLED: process.env.CONSENSUS_ENABLED === 'true',
     CONSENSUS_MIN_AGREEMENT: parseInt(process.env.CONSENSUS_MIN_AGREEMENT || '2', 10),
@@ -468,8 +477,13 @@ export const ENV = {
     /**
      * Max allowed book slippage vs the last agreeing trader's fill price (± percent).
      * e.g. 15 → ask must be within [ref*0.85, ref*1.15] for BUYs.
+     * Ignored when SKIP_PRICE_SLIPPAGE is true.
      */
     MAX_SLIPPAGE_PERCENT: parseFloat(process.env.MAX_SLIPPAGE_PERCENT || '15'),
+    /** When true, BUY orders skip the ±% book vs ref-price band check. */
+    SKIP_PRICE_SLIPPAGE: ['true', '1', 'yes', 'on'].includes(
+        (process.env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
+    ),
     // Health HTTP server (Coolify / Docker healthchecks)
     HEALTH_PORT: parseInt(process.env.HEALTH_PORT || process.env.PORT || '3000', 10),
 };

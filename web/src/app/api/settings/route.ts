@@ -124,6 +124,10 @@ function envToSettings(env: Record<string, string>): BotSettings {
       minOrderSizeUSD: parseFloat(env.MIN_ORDER_SIZE_USD || '1'),
       maxPositionSizeUSD: env.MAX_POSITION_SIZE_USD ? parseFloat(env.MAX_POSITION_SIZE_USD) : null,
       maxDailyVolumeUSD: env.MAX_DAILY_VOLUME_USD ? parseFloat(env.MAX_DAILY_VOLUME_USD) : null,
+      skipPriceSlippage: ['true', '1', 'yes', 'on'].includes(
+        (env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
+      ),
+      maxSlippagePercent: parseFloat(env.MAX_SLIPPAGE_PERCENT || '15') || 15,
     },
     adaptiveStrategy: {
       minPercent: parseFloat(env.ADAPTIVE_MIN_PERCENT || '5'),
@@ -286,6 +290,12 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
     if (update.safetyLimits.maxDailyVolumeUSD !== undefined) {
       envUpdates.MAX_DAILY_VOLUME_USD = update.safetyLimits.maxDailyVolumeUSD?.toString() || '';
     }
+    if (update.safetyLimits.skipPriceSlippage !== undefined) {
+      envUpdates.SKIP_PRICE_SLIPPAGE = update.safetyLimits.skipPriceSlippage.toString();
+    }
+    if (update.safetyLimits.maxSlippagePercent !== undefined) {
+      envUpdates.MAX_SLIPPAGE_PERCENT = update.safetyLimits.maxSlippagePercent.toString();
+    }
   }
 
   if (update.adaptiveStrategy) {
@@ -372,6 +382,8 @@ function envFromProcess(): Record<string, string> {
     'MIN_ORDER_SIZE_USD',
     'MAX_POSITION_SIZE_USD',
     'MAX_DAILY_VOLUME_USD',
+    'SKIP_PRICE_SLIPPAGE',
+    'MAX_SLIPPAGE_PERCENT',
     'ADAPTIVE_MIN_PERCENT',
     'ADAPTIVE_MAX_PERCENT',
     'ADAPTIVE_THRESHOLD_USD',
