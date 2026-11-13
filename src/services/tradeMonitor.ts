@@ -164,7 +164,17 @@ const fetchTradeData = async () => {
                 });
 
                 await newActivity.save();
-                Logger.info(`New trade detected for ${address.slice(0, 6)}...${address.slice(-4)}`);
+                const side = (activity.side || 'BUY').toUpperCase();
+                const market =
+                    activity.slug ||
+                    activity.eventSlug ||
+                    activity.title ||
+                    activity.outcome ||
+                    activity.asset.slice(0, 12);
+                Logger.info(
+                    `New trade detected for ${address.slice(0, 6)}...${address.slice(-4)} · ` +
+                        `${side} $${Number(activity.usdcSize || 0).toFixed(2)} · ${market}`
+                );
             }
 
             // Also fetch and update positions
@@ -217,8 +227,8 @@ const fetchTradeData = async () => {
     }
 };
 
-// Track if this is the first run
-let isFirstRun = true;
+// Track if historical priming already ran (must finish before executor starts)
+let historyPrimed = false;
 // Track if monitor should continue running
 let isRunning = true;
 
@@ -230,31 +240,38 @@ export const stopTradeMonitor = () => {
     Logger.info('Trade monitor shutdown requested...');
 };
 
-const tradeMonitor = async () => {
+/**
+ * Mark pre-existing DB trades as processed so a restart does not copy old fills.
+ * Call once from main() before starting the executor (avoids racing consensus).
+ */
+export const primeHistoricalTrades = async (): Promise<void> => {
+    if (historyPrimed) return;
     await init();
+    Logger.info('First run: marking all historical trades as processed...');
+    for (const { address, UserActivity } of getUserModels()) {
+        const count = await UserActivity.updateMany(
+            { bot: false },
+            { $set: { bot: true, botExcutedTime: 999 } }
+        );
+        if (count.modifiedCount > 0) {
+            Logger.info(
+                `Marked ${count.modifiedCount} historical trades as processed for ${address.slice(0, 6)}...${address.slice(-4)}`
+            );
+        }
+    }
+    historyPrimed = true;
+    Logger.success('Historical trades processed. Now monitoring for new trades only.');
+    Logger.separator();
+};
+
+const tradeMonitor = async () => {
+    if (!historyPrimed) {
+        await primeHistoricalTrades();
+    }
     Logger.success(
         `Monitoring ${getUserAddresses().length} trader(s) every ${ENV.FETCH_INTERVAL}s`
     );
     Logger.separator();
-
-    // On first run, mark all existing historical trades as already processed
-    if (isFirstRun) {
-        Logger.info('First run: marking all historical trades as processed...');
-        for (const { address, UserActivity } of getUserModels()) {
-            const count = await UserActivity.updateMany(
-                { bot: false },
-                { $set: { bot: true, botExcutedTime: 999 } }
-            );
-            if (count.modifiedCount > 0) {
-                Logger.info(
-                    `Marked ${count.modifiedCount} historical trades as processed for ${address.slice(0, 6)}...${address.slice(-4)}`
-                );
-            }
-        }
-        isFirstRun = false;
-        Logger.success('\nHistorical trades processed. Now monitoring for new trades only.');
-        Logger.separator();
-    }
 
     while (isRunning) {
         await fetchTradeData();

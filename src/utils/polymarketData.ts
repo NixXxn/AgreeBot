@@ -38,7 +38,7 @@ export const normalizeActivity = (row: Json) => {
         proxyWallet: str(row.proxy_wallet ?? row.proxyWallet),
         timestamp: num(row.timestamp ?? row.block_timestamp),
         conditionId: str(row.condition_id ?? row.conditionId),
-        type: str(row.type, 'TRADE'),
+        type: str(row.type, 'TRADE').toUpperCase(),
         size: num(row.size),
         usdcSize: num(row.usdc_size ?? row.usdcSize),
         transactionHash: str(row.transaction_hash ?? row.transactionHash),

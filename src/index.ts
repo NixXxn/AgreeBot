@@ -115,6 +115,11 @@ export const main = async () => {
         await reclassifyBogusLiveSignals();
 
         Logger.separator();
+        // Finish historical priming before the executor runs, otherwise a restart
+        // can mark brand-new trades as processed and consensus never starts.
+        const { primeHistoricalTrades } = await import('./services/tradeMonitor');
+        await primeHistoricalTrades();
+
         Logger.info('Starting trade monitor...');
         tradeMonitor();
 

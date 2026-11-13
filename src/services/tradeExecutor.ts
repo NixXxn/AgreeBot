@@ -53,7 +53,11 @@ const readTempTrades = async (): Promise<TradeWithUser[]> => {
         // This prevents processing the same trade multiple times
         const trades = await model
             .find({
-                $and: [{ type: 'TRADE' }, { bot: false }, { botExcutedTime: 0 }],
+                $and: [
+                    { type: { $regex: /^trade$/i } },
+                    { bot: false },
+                    { $or: [{ botExcutedTime: 0 }, { botExcutedTime: { $exists: false } }] },
+                ],
             })
             .exec();
 
@@ -464,9 +468,10 @@ const tradeExecutor = async (_initialClient?: ClobClient | null) => {
             );
             lastModeWasPaper = ENV.PAPER_MODE;
         }
-        const clobClient = await ensureClobClient();
-
+        // Queue / consensus must not wait on CLOB init — otherwise monitor
+        // keeps saving trades while this loop is stuck and never starts consensus.
         const trades = await readTempTrades();
+        const clobClient = await ensureClobClient();
 
         // --- Consensus path ---
         if (ENV.CONSENSUS_ENABLED && trades.length > 0) {
@@ -485,11 +490,18 @@ const tradeExecutor = async (_initialClient?: ClobClient | null) => {
                 Logger.clearLine();
                 Logger.info(
                     `📥 ${consensusTrades.length} trade(s) queued for consensus ` +
-                        `(need ${ENV.CONSENSUS_MIN_AGREEMENT} agreeing traders)`
+                        `(need ${ENV.CONSENSUS_MIN_AGREEMENT} agreeing traders on the same outcome)`
                 );
                 for (const trade of consensusTrades) {
                     await claimForConsensus(trade);
                 }
+            }
+
+            if (immediateTrades.length > 0 && consensusTrades.length === 0) {
+                Logger.info(
+                    `${immediateTrades.length} trade(s) bypass consensus ` +
+                        `(APPLY_TO=${ENV.CONSENSUS_APPLY_TO} — e.g. SELLs run immediately)`
+                );
             }
 
             // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) execute normally
