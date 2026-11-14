@@ -15,12 +15,19 @@ const AUTO_RESOLVE_INTERVAL = ENV.AUTO_RESOLVE_INTERVAL;
 
 // Contract addresses on Polygon
 const CTF_CONTRACT_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
-const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const NEG_RISK_ADAPTER_ADDRESS = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+/** Legacy Polymarket collateral (USDC.e) — many resolved CTF conditions still use this. */
+const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+/** Current CLOB v2 collateral (pUSD). */
+const PUSD_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
 
 // CTF Contract ABI (only the functions we need)
 const CTF_ABI = [
     'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] calldata indexSets) external',
     'function balanceOf(address owner, uint256 tokenId) external view returns (uint256)',
+];
+const NEG_RISK_ABI = [
+    'function redeemPositions(bytes32 _conditionId, uint256[] _amounts) external',
 ];
 
 // Polymarket enforces a 1 token minimum on sell orders
@@ -42,6 +49,8 @@ interface Position {
     outcome?: string;
     slug?: string;
     redeemable?: boolean;
+    negativeRisk?: boolean;
+    outcomeIndex?: number;
 }
 
 interface ResolveResult {
@@ -231,43 +240,129 @@ const trySellPosition = async (
     return { sold: soldTokens, proceeds: proceedsUsd, orderbookAvailable };
 };
 
+const toConditionIdBytes32 = (conditionId: string): string =>
+    ethers.utils.hexZeroPad(ethers.BigNumber.from(conditionId).toHexString(), 32);
+
+const encodeCtfRedeem = (collateralToken: string, conditionIdBytes32: string): string => {
+    const iface = new ethers.utils.Interface(CTF_ABI);
+    return iface.encodeFunctionData('redeemPositions', [
+        collateralToken,
+        ethers.constants.HashZero,
+        conditionIdBytes32,
+        [1, 2],
+    ]);
+};
+
+const encodeNegRiskRedeem = (
+    conditionIdBytes32: string,
+    size: number,
+    outcomeIndex?: number
+): string => {
+    const iface = new ethers.utils.Interface(NEG_RISK_ABI);
+    // Amounts are [YES, NO] in token base units (6 decimals)
+    const raw = ethers.utils.parseUnits(Math.max(size, 0).toFixed(6), 6);
+    const amounts =
+        outcomeIndex === 1
+            ? [ethers.constants.Zero, raw]
+            : [raw, ethers.constants.Zero];
+    return iface.encodeFunctionData('redeemPositions', [conditionIdBytes32, amounts]);
+};
+
 /**
- * Redeem position on-chain via CTF contract
+ * Gasless redeem via Polymarket Relayer (deposit wallet WALLET batch).
+ * @see https://docs.polymarket.com/trading/wallets-auth#execute-gasless-transactions
+ */
+const redeemViaRelayer = async (
+    position: Position
+): Promise<{ success: boolean; error?: string; txHash?: string }> => {
+    const { executeDepositWalletBatch, shouldUseGaslessRelayer } = await import(
+        '../utils/relayerWallet'
+    );
+    if (!shouldUseGaslessRelayer()) {
+        return { success: false, error: 'Relayer creds / deposit wallet not configured' };
+    }
+
+    const conditionIdBytes32 = toConditionIdBytes32(position.conditionId);
+
+    if (position.negativeRisk) {
+        Logger.info(`   🔗 Gasless redeem via Relayer (NegRisk)...`);
+        const data = encodeNegRiskRedeem(
+            conditionIdBytes32,
+            position.size,
+            position.outcomeIndex
+        );
+        const result = await executeDepositWalletBatch(
+            [{ target: NEG_RISK_ADAPTER_ADDRESS, value: '0', data }],
+            `AgreeBot redeem neg-risk ${position.slug || position.conditionId.slice(0, 10)}`
+        );
+        if (result.success) {
+            Logger.success(
+                `   ✅ Redeemed gaslessly via Relayer` +
+                    (result.txHash ? ` tx=${result.txHash}` : result.txId ? ` id=${result.txId}` : '')
+            );
+            return { success: true, txHash: result.txHash };
+        }
+        return { success: false, error: result.error };
+    }
+
+    // Try USDC.e first (legacy CTF conditions), then pUSD
+    const collaterals = [USDC_E_ADDRESS, PUSD_ADDRESS];
+    let lastError = 'unknown';
+    for (const collateral of collaterals) {
+        Logger.info(
+            `   🔗 Gasless redeem via Relayer (CTF collateral ${collateral.slice(0, 8)}…)…`
+        );
+        const data = encodeCtfRedeem(collateral, conditionIdBytes32);
+        const result = await executeDepositWalletBatch(
+            [{ target: CTF_CONTRACT_ADDRESS, value: '0', data }],
+            `AgreeBot redeem ${position.slug || position.conditionId.slice(0, 10)}`
+        );
+        if (result.success) {
+            Logger.success(
+                `   ✅ Redeemed gaslessly via Relayer` +
+                    (result.txHash ? ` tx=${result.txHash}` : result.txId ? ` id=${result.txId}` : '')
+            );
+            return { success: true, txHash: result.txHash };
+        }
+        lastError = result.error || lastError;
+        Logger.warning(`   Relayer redeem with ${collateral.slice(0, 8)}… failed: ${lastError}`);
+    }
+    return { success: false, error: lastError };
+};
+
+/**
+ * Redeem position — prefer Polymarket Relayer (gasless), fall back to EOA-paid CTF tx.
  */
 const redeemPosition = async (position: Position): Promise<{ success: boolean; error?: string }> => {
     try {
+        const { shouldUseGaslessRelayer } = await import('../utils/relayerWallet');
+        if (shouldUseGaslessRelayer()) {
+            const gasless = await redeemViaRelayer(position);
+            if (gasless.success) return { success: true };
+            Logger.warning(
+                `   Relayer redeem failed (${gasless.error}) — trying direct EOA redeem (needs POL)`
+            );
+        } else {
+            Logger.info(`   🔗 Attempting on-chain redemption (EOA / needs POL for gas)...`);
+        }
+
         const { ctfContract, provider } = await getContract();
+        const conditionIdBytes32 = toConditionIdBytes32(position.conditionId);
 
-        // Convert conditionId to bytes32 format
-        const conditionIdBytes32 = ethers.utils.hexZeroPad(
-            ethers.BigNumber.from(position.conditionId).toHexString(),
-            32
-        );
-
-        // parentCollectionId is always zero for Polymarket
-        const parentCollectionId = ethers.constants.HashZero;
-
-        // indexSets: [1, 2] represents both outcome collections
-        const indexSets = [1, 2];
-
-        Logger.info(`   🔗 Attempting on-chain redemption...`);
-
-        // Get current gas price from network
         const feeData = await provider!.getFeeData();
         const gasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-
         if (!gasPrice) {
             throw new Error('Could not determine gas price');
         }
-
-        // Add 20% buffer to ensure transaction goes through
         const adjustedGasPrice = gasPrice.mul(120).div(100);
 
+        // Prefer USDC.e for legacy conditions; pUSD for newer CLOB v2 markets
+        const collateral = ENV.USDC_CONTRACT_ADDRESS || USDC_E_ADDRESS;
         const tx = await ctfContract.redeemPositions(
-            USDC_ADDRESS,
-            parentCollectionId,
+            collateral,
+            ethers.constants.HashZero,
             conditionIdBytes32,
-            indexSets,
+            [1, 2],
             {
                 gasLimit: 500000,
                 gasPrice: adjustedGasPrice,
@@ -284,11 +379,10 @@ const redeemPosition = async (position: Position): Promise<{ success: boolean; e
                 receipt.gasUsed.mul(adjustedGasPrice),
                 18
             );
-            Logger.success(`   ✅ Redeemed on-chain! Gas: ${parseFloat(gasCost).toFixed(6)} MATIC`);
+            Logger.success(`   ✅ Redeemed on-chain! Gas: ${parseFloat(gasCost).toFixed(6)} POL`);
             return { success: true };
-        } else {
-            return { success: false, error: 'Transaction reverted' };
         }
+        return { success: false, error: 'Transaction reverted' };
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { success: false, error: errorMessage };
@@ -308,6 +402,8 @@ const loadPositions = async (address: string): Promise<Position[]> => {
         outcome: pos.outcome,
         slug: pos.slug,
         redeemable: pos.redeemable,
+        negativeRisk: pos.negativeRisk,
+        outcomeIndex: pos.outcomeIndex,
     }));
     return positions.filter((pos) => (pos.size || 0) > ZERO_THRESHOLD);
 };
@@ -330,7 +426,7 @@ const resolvePosition = async (
 
     // If orderbook not available and position is redeemable, try on-chain redeem
     if (!sellResult.orderbookAvailable && position.redeemable) {
-        Logger.info(`   📦 Orderbook closed, trying on-chain redeem...`);
+        Logger.info(`   📦 Orderbook closed, trying redeem (Relayer gasless if configured)...`);
 
         const redeemResult = await redeemPosition(position);
 

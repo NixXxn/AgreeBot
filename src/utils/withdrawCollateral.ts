@@ -3,12 +3,8 @@ import { getContractConfig } from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import Logger from './logger';
 import { createPolygonProvider } from './rpcProvider';
+import { executeDepositWalletBatch, shouldUseGaslessRelayer } from './relayerWallet';
 
-const RELAYER_URL = (process.env.POLYMARKET_RELAYER_URL || 'https://relayer-v2.polymarket.com').replace(
-    /\/$/,
-    ''
-);
-const DEPOSIT_WALLET_FACTORY = '0x00000000000Fb5C9ADea0298D729A0CB3823Cc07';
 const POLYGON_CHAIN_ID = 137;
 
 const ERC20_ABI = [
@@ -24,21 +20,6 @@ export interface WithdrawResult {
     token?: string;
     error?: string;
 }
-
-const relayerHeaders = (): Record<string, string> => {
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-    };
-    if (ENV.RELAYER_API_KEY) {
-        headers.RELAYER_API_KEY = ENV.RELAYER_API_KEY;
-    }
-    if (ENV.RELAYER_API_KEY_ADDRESS) {
-        headers.RELAYER_API_KEY_ADDRESS = ENV.RELAYER_API_KEY_ADDRESS;
-    }
-    return headers;
-};
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const resolveCollateralToken = (): string => {
     try {
@@ -92,49 +73,6 @@ export const resolveFundedCollateral = async (
     return best;
 };
 
-const pollRelayerTx = async (
-    transactionID: string,
-    timeoutMs = 120_000
-): Promise<{ state: string; transactionHash?: string }> => {
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-        const res = await fetch(`${RELAYER_URL}/v1/account/transactions/${transactionID}`, {
-            headers: relayerHeaders(),
-        });
-        if (!res.ok) {
-            await sleep(2000);
-            continue;
-        }
-        const body = (await res.json()) as {
-            state?: string;
-            transactionHash?: string;
-            hash?: string;
-        };
-        const state = (body.state || '').toUpperCase();
-        if (
-            state.includes('CONFIRMED') ||
-            state.includes('MINED') ||
-            state.includes('EXECUTED') ||
-            state === 'STATE_CONFIRMED'
-        ) {
-            return {
-                state,
-                transactionHash: body.transactionHash || body.hash,
-            };
-        }
-        if (
-            state.includes('FAILED') ||
-            state.includes('INVALID') ||
-            state === 'STATE_FAILED' ||
-            state === 'STATE_INVALID'
-        ) {
-            return { state, transactionHash: body.transactionHash || body.hash };
-        }
-        await sleep(2500);
-    }
-    return { state: 'TIMEOUT' };
-};
-
 /**
  * Transfer collateral from deposit wallet (signature type 3) via gasless relayer batch.
  */
@@ -142,25 +80,11 @@ const withdrawViaDepositWallet = async (
     amountUsd: number,
     recipient: string
 ): Promise<WithdrawResult> => {
-    if (!ENV.RELAYER_API_KEY || !ENV.RELAYER_API_KEY_ADDRESS) {
-        return {
-            success: false,
-            error: 'RELAYER_API_KEY / RELAYER_API_KEY_ADDRESS required for deposit-wallet withdraw',
-        };
-    }
-
     const funder = ENV.PROXY_WALLET?.trim();
     if (!funder) {
         return { success: false, error: 'PROXY_WALLET / POLY_FUNDER not set' };
     }
 
-    const pk = ENV.PRIVATE_KEY?.trim();
-    if (!pk) {
-        return { success: false, error: 'PRIVATE_KEY not set' };
-    }
-
-    const provider = await createPolygonProvider();
-    const wallet = new ethers.Wallet(pk.startsWith('0x') ? pk : `0x${pk}`, provider);
     const { token, balanceRaw, decimals } = await resolveFundedCollateral(funder);
     const amountRaw = ethers.utils.parseUnits(amountUsd.toFixed(decimals), decimals);
 
@@ -177,130 +101,12 @@ const withdrawViaDepositWallet = async (
 
     const iface = new ethers.utils.Interface(ERC20_ABI);
     const data = iface.encodeFunctionData('transfer', [recipient, amountRaw]);
-    const calls = [
-        {
-            target: token as `0x${string}`,
-            value: '0',
-            data: data as `0x${string}`,
-        },
-    ];
-
-    const paramsRes = await fetch(
-        `${RELAYER_URL}/v1/account/transactions/params?address=${wallet.address}&type=WALLET`,
-        { headers: relayerHeaders() }
+    const result = await executeDepositWalletBatch(
+        [{ target: token, value: '0', data }],
+        `AgreeBot auto-claim $${amountUsd.toFixed(2)}`
     );
-    if (!paramsRes.ok) {
-        const text = await paramsRes.text();
-        return { success: false, error: `Relayer params failed: ${paramsRes.status} ${text}`, token };
-    }
-    const paramsBody = (await paramsRes.json()) as { nonce?: string | number };
-    const nonce = String(paramsBody.nonce ?? '');
-    if (!nonce) {
-        return { success: false, error: 'Relayer returned empty nonce', token };
-    }
 
-    const deadline = String(Math.floor(Date.now() / 1000) + 600);
-    const domain = {
-        name: 'DepositWallet',
-        version: '1',
-        chainId: POLYGON_CHAIN_ID,
-        verifyingContract: funder,
-    };
-    const types = {
-        Call: [
-            { name: 'target', type: 'address' },
-            { name: 'value', type: 'uint256' },
-            { name: 'data', type: 'bytes' },
-        ],
-        Batch: [
-            { name: 'wallet', type: 'address' },
-            { name: 'nonce', type: 'uint256' },
-            { name: 'deadline', type: 'uint256' },
-            { name: 'calls', type: 'Call[]' },
-        ],
-    };
-    const message = {
-        wallet: funder,
-        nonce,
-        deadline,
-        calls: calls.map((c) => ({
-            target: c.target,
-            value: c.value,
-            data: c.data,
-        })),
-    };
-
-    const signature = await wallet._signTypedData(domain, types, message);
-
-    const submitRes = await fetch(`${RELAYER_URL}/submit`, {
-        method: 'POST',
-        headers: relayerHeaders(),
-        body: JSON.stringify({
-            type: 'WALLET',
-            from: wallet.address,
-            to: DEPOSIT_WALLET_FACTORY,
-            nonce,
-            signature,
-            metadata: `AgreeBot auto-claim $${amountUsd.toFixed(2)}`,
-            depositWalletParams: {
-                depositWallet: funder,
-                deadline,
-                calls,
-            },
-        }),
-    });
-
-    if (!submitRes.ok) {
-        const text = await submitRes.text();
-        return { success: false, error: `Relayer submit failed: ${submitRes.status} ${text}`, token };
-    }
-
-    const submitBody = (await submitRes.json()) as {
-        transactionID?: string;
-        transactionId?: string;
-        id?: string;
-        error?: string;
-    };
-    const transactionID =
-        submitBody.transactionID || submitBody.transactionId || submitBody.id || '';
-    if (!transactionID) {
-        return {
-            success: false,
-            error: submitBody.error || 'Relayer submit returned no transactionID',
-            token,
-        };
-    }
-
-    const polled = await pollRelayerTx(transactionID);
-    if (polled.state === 'TIMEOUT') {
-        return {
-            success: false,
-            txId: transactionID,
-            error: 'Relayer confirmation timed out',
-            token,
-        };
-    }
-    if (
-        polled.state.includes('FAILED') ||
-        polled.state.includes('INVALID') ||
-        polled.state === 'STATE_FAILED' ||
-        polled.state === 'STATE_INVALID'
-    ) {
-        return {
-            success: false,
-            txId: transactionID,
-            txHash: polled.transactionHash,
-            error: `Relayer tx ${polled.state}`,
-            token,
-        };
-    }
-
-    return {
-        success: true,
-        txId: transactionID,
-        txHash: polled.transactionHash,
-        token,
-    };
+    return { ...result, token };
 };
 
 /**
@@ -361,11 +167,9 @@ export const withdrawCollateralToWallet = async (
     }
 
     const sig = ENV.POLY_SIGNATURE_TYPE;
-    if (sig === '3' || sig === '') {
-        // Default path for deposit wallets; also try when auto-detect left type empty but funder ≠ EOA
+    if (shouldUseGaslessRelayer() || sig === '3') {
         const result = await withdrawViaDepositWallet(amountUsd, recipient);
         if (result.success || sig === '3') return result;
-        // Fall through to EOA if type unset and deposit path failed for missing relayer etc.
     }
 
     if (sig === '0' || !ENV.PROXY_WALLET?.trim()) {
@@ -373,8 +177,6 @@ export const withdrawCollateralToWallet = async (
     }
 
     if (sig === '1' || sig === '2') {
-        // Safe/Proxy gasless withdraw needs builder-relayer SAFE/PROXY execute —
-        // deposit-wallet path won't work. Attempt deposit path only if misconfigured as 3.
         return {
             success: false,
             error: `Auto-claim withdraw for POLY_SIGNATURE_TYPE=${sig} needs Safe/Proxy relayer execute (not yet wired). Use type 3 or EOA.`,
