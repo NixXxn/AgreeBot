@@ -6,9 +6,15 @@ import Logger from './logger';
 import { calculateOrderSize, getTradeMultiplier } from '../config/copyStrategy';
 import {
     applyPaperFill,
+    getOppositePaperPosition,
     getPaperPosition,
     hasOpenPaperPosition,
 } from '../services/paperPositions';
+import {
+    computeHedgeArbPlan,
+    findOppositePosition,
+    floorToTick,
+} from './hedgeArb';
 
 const RETRY_LIMIT = ENV.RETRY_LIMIT;
 const COPY_STRATEGY_CONFIG = ENV.COPY_STRATEGY_CONFIG;
@@ -93,7 +99,9 @@ const postOrder = async (
     user_balance: number,
     userAddress: string,
     /** Price for slippage band — last agreeing trader's fill for consensus */
-    slippageRefPrice?: number
+    slippageRefPrice?: number,
+    /** All of our open positions (used to detect opposite-outcome hedge) */
+    myPositions?: UserPositionInterface[]
 ): Promise<PostOrderResult> => {
     const UserActivity = getUserActivityModel(userAddress);
     const refPrice =
@@ -102,6 +110,31 @@ const postOrder = async (
         slippageRefPrice > 0
             ? Number(slippageRefPrice)
             : Number(trade.price) || 0;
+
+    const resolveOppositeHeld = (): {
+        avgPrice: number;
+        outcome?: string;
+        sizeUsd: number;
+    } | null => {
+        if (!ENV.HEDGE_ARB_ENABLED) return null;
+        if (ENV.PAPER_MODE) {
+            const opp = getOppositePaperPosition(trade.conditionId, trade.asset);
+            if (!opp) return null;
+            return { avgPrice: opp.avgPrice, outcome: opp.outcome, sizeUsd: opp.sizeUsd };
+        }
+        const list = myPositions || (my_position ? [my_position] : []);
+        const opp = findOppositePosition(list, trade.conditionId, trade.asset);
+        if (!opp) return null;
+        const sizeUsd =
+            (opp.currentValue && opp.currentValue > 0
+                ? opp.currentValue
+                : (opp.size || 0) * (opp.avgPrice || 0)) || 0;
+        return {
+            avgPrice: opp.avgPrice,
+            outcome: opp.outcome,
+            sizeUsd,
+        };
+    };
 
     // Paper / preview mode: log the signal and mark processed — never place orders
     if (ENV.PAPER_MODE) {
@@ -119,6 +152,32 @@ const postOrder = async (
             );
             await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
             return { executed: false, sizeUsd: 0, paper: true };
+        }
+
+        if (side === 'BUY') {
+            const held = resolveOppositeHeld();
+            if (held) {
+                const plan = computeHedgeArbPlan(
+                    held.avgPrice,
+                    trade.price,
+                    ENV.HEDGE_ARB_MAX_SUM,
+                    ENV.HEDGE_ARB_MAX_LEG
+                );
+                Logger.info(
+                    `[PAPER] Hedge guard vs ${held.outcome || 'other side'} @$${held.avgPrice.toFixed(
+                        3
+                    )}: ${plan.reason}`
+                );
+                if (plan.skip || !plan.allowMarket) {
+                    Logger.warning(
+                        `[PAPER] Skip opposite-side BUY — would need limit ≤ $${plan.maxLimitPrice.toFixed(
+                            3
+                        )} (ask/ref $${Number(trade.price).toFixed(3)})`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+                    return { executed: false, sizeUsd: 0, paper: true };
+                }
+            }
         }
 
         // Virtual balance for sizing (PAPER_BALANCE_USD, or real wallet balance if set)
@@ -301,6 +360,120 @@ const postOrder = async (
             }
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
             return liveSkip();
+        }
+
+        // Opposite-outcome hedge: only market-buy if both legs stay under arb caps;
+        // otherwise rest a GTC limit at the residual price (or skip).
+        const oppositeHeld = resolveOppositeHeld();
+        if (oppositeHeld) {
+            let peekAsk = Number(trade.price) || 0;
+            try {
+                const book = await clobClient.getOrderBook(trade.asset);
+                if (book.asks?.length) {
+                    const bestAsk = book.asks.reduce((min, ask) => {
+                        return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
+                    }, book.asks[0]);
+                    peekAsk = parseFloat(bestAsk.price);
+                }
+            } catch {
+                /* use trade.price */
+            }
+
+            const plan = computeHedgeArbPlan(
+                oppositeHeld.avgPrice,
+                peekAsk,
+                ENV.HEDGE_ARB_MAX_SUM,
+                ENV.HEDGE_ARB_MAX_LEG
+            );
+            Logger.info(
+                `⚖️  Hedge guard vs ${oppositeHeld.outcome || 'other side'} ` +
+                    `@$${oppositeHeld.avgPrice.toFixed(3)}: ${plan.reason}`
+            );
+
+            if (plan.skip) {
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                return liveSkip();
+            }
+
+            if (!plan.allowMarket) {
+                let tick = 0.01;
+                try {
+                    const ts = await clobClient.getTickSize(trade.asset);
+                    const n = parseFloat(String(ts));
+                    if (Number.isFinite(n) && n > 0) tick = n;
+                } catch {
+                    /* default 1¢ */
+                }
+                const limitPrice = floorToTick(plan.maxLimitPrice, tick);
+                if (limitPrice < tick) {
+                    Logger.warning(
+                        `Hedge limit $${plan.maxLimitPrice.toFixed(4)} below tick $${tick} — skip`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    return liveSkip();
+                }
+
+                // Size in shares; cap notional near opposite position when known
+                let budgetUsd = orderCalc.finalAmount;
+                if (oppositeHeld.sizeUsd > 0) {
+                    budgetUsd = Math.min(budgetUsd, oppositeHeld.sizeUsd);
+                }
+                const sizeTokens =
+                    Math.floor((budgetUsd / limitPrice) * 100) / 100;
+                if (sizeTokens < MIN_ORDER_SIZE_TOKENS || budgetUsd < MIN_ORDER_SIZE_USD) {
+                    Logger.warning(
+                        `Hedge limit size too small ($${budgetUsd.toFixed(2)} @ $${limitPrice}) — skip`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    return liveSkip();
+                }
+
+                Logger.info(
+                    `📌 Placing GTC hedge limit: ${sizeTokens} @ $${limitPrice.toFixed(4)} ` +
+                        `(held @$${oppositeHeld.avgPrice.toFixed(3)} + limit ≤ $${ENV.HEDGE_ARB_MAX_SUM})`
+                );
+                try {
+                    const resp = await clobClient.createAndPostOrder(
+                        {
+                            tokenID: trade.asset,
+                            price: limitPrice,
+                            size: sizeTokens,
+                            side: Side.BUY,
+                        },
+                        undefined,
+                        OrderType.GTC,
+                        false
+                    );
+                    if (resp.success === true) {
+                        Logger.success(
+                            `Hedge limit resting` +
+                                (resp.orderID ? ` order=${resp.orderID}` : '') +
+                                (resp.status ? ` status=${resp.status}` : '')
+                        );
+                        // Not filled yet — count as not entered for ledger; order is live on book
+                        await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                        return {
+                            executed: resp.status === 'matched',
+                            sizeUsd:
+                                resp.status === 'matched'
+                                    ? Math.round(sizeTokens * limitPrice * 100) / 100
+                                    : 0,
+                            paper: false,
+                        };
+                    }
+                    Logger.warning(
+                        `Hedge limit rejected: ${extractOrderError(resp) || 'unknown'}`
+                    );
+                } catch (error) {
+                    Logger.error(
+                        `Hedge limit failed: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    );
+                }
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                return liveSkip();
+            }
         }
 
         let remaining = orderCalc.finalAmount;

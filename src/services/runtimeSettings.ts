@@ -324,6 +324,17 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
             overrides.SKIP_PRICE_SLIPPAGE.toLowerCase()
         );
     }
+    if (overrides.HEDGE_ARB_ENABLED !== undefined) {
+        ENV.HEDGE_ARB_ENABLED = overrides.HEDGE_ARB_ENABLED !== 'false';
+    }
+    if (overrides.HEDGE_ARB_MAX_SUM) {
+        const n = parseFloat(overrides.HEDGE_ARB_MAX_SUM);
+        if (Number.isFinite(n) && n > 0) ENV.HEDGE_ARB_MAX_SUM = n;
+    }
+    if (overrides.HEDGE_ARB_MAX_LEG) {
+        const n = parseFloat(overrides.HEDGE_ARB_MAX_LEG);
+        if (Number.isFinite(n) && n > 0) ENV.HEDGE_ARB_MAX_LEG = n;
+    }
     if (overrides.FETCH_INTERVAL) {
         ENV.FETCH_INTERVAL = parseInt(overrides.FETCH_INTERVAL, 10) || ENV.FETCH_INTERVAL;
     }

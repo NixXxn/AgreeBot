@@ -176,11 +176,14 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
         );
 
         let my_position: UserPositionInterface | undefined;
+        let my_positions: UserPositionInterface[] = [];
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
+            my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
             my_position = my_positions.find(
-                (position) => position.conditionId === trade.conditionId
+                (position) =>
+                    position.conditionId === trade.conditionId &&
+                    position.asset === trade.asset
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
@@ -203,7 +206,9 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             trade,
             my_balance,
             user_balance,
-            trade.userAddress
+            trade.userAddress,
+            undefined,
+            my_positions
         );
 
         const side = (trade.side || 'BUY').toUpperCase() as 'BUY' | 'SELL';
@@ -274,11 +279,15 @@ const doConsensusTrading = async (
         );
 
         let my_position: UserPositionInterface | undefined;
+        let my_positions: UserPositionInterface[] = [];
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
+            my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
+            // Same outcome token — not merely same market (avoid treating the hedge as our position)
             my_position = my_positions.find(
-                (position) => position.conditionId === ready.trade.conditionId
+                (position) =>
+                    position.conditionId === ready.trade.conditionId &&
+                    position.asset === ready.trade.asset
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
@@ -300,7 +309,8 @@ const doConsensusTrading = async (
             my_balance,
             user_balance,
             ready.referenceTrader,
-            ready.lastAgreeingPrice
+            ready.lastAgreeingPrice,
+            my_positions
         );
 
         const executed = orderResult.executed === true;
@@ -360,11 +370,13 @@ const doAggregatedTrading = async (
         );
 
         let my_position: UserPositionInterface | undefined;
+        let my_positions: UserPositionInterface[] = [];
         let my_balance = 0;
         if (PROXY_WALLET) {
-            const my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
+            my_positions = (await fetchUserPositions(PROXY_WALLET)) as UserPositionInterface[];
             my_position = my_positions.find(
-                (position) => position.conditionId === agg.conditionId
+                (position) =>
+                    position.conditionId === agg.conditionId && position.asset === agg.asset
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
@@ -395,7 +407,9 @@ const doAggregatedTrading = async (
             syntheticTrade,
             my_balance,
             user_balance,
-            agg.userAddress
+            agg.userAddress,
+            undefined,
+            my_positions
         );
 
         const executed = orderResult.executed === true;

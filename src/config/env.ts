@@ -484,6 +484,14 @@ export const ENV = {
     SKIP_PRICE_SLIPPAGE: ['true', '1', 'yes', 'on'].includes(
         (process.env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
     ),
+    /**
+     * When we already hold the opposite outcome of a market, only buy the
+     * second side if both legs stay under HEDGE_ARB_MAX_LEG and their sum
+     * ≤ HEDGE_ARB_MAX_SUM (else place a GTC limit at the residual price).
+     */
+    HEDGE_ARB_ENABLED: process.env.HEDGE_ARB_ENABLED !== 'false',
+    HEDGE_ARB_MAX_SUM: parseFloat(process.env.HEDGE_ARB_MAX_SUM || '0.90'),
+    HEDGE_ARB_MAX_LEG: parseFloat(process.env.HEDGE_ARB_MAX_LEG || '0.90'),
     // Health HTTP server (Coolify / Docker healthchecks)
     HEALTH_PORT: parseInt(process.env.HEALTH_PORT || process.env.PORT || '3000', 10),
 };

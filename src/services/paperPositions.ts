@@ -82,6 +82,25 @@ export const hasOpenPaperPosition = (asset: string): boolean => {
     return Boolean(pos && pos.tokens > 1e-8);
 };
 
+/** Opposite outcome already held in the paper book for this market. */
+export const getOppositePaperPosition = (
+    conditionId: string,
+    asset: string
+): PaperPosition | undefined => {
+    if (!conditionId || !asset) return undefined;
+    for (const pos of book.values()) {
+        if (
+            pos.conditionId === conditionId &&
+            pos.asset !== asset &&
+            pos.tokens > 1e-8 &&
+            pos.avgPrice > 0
+        ) {
+            return pos;
+        }
+    }
+    return undefined;
+};
+
 /** Wipe in-memory paper book (e.g. after dashboard Reset Paper Stats). */
 export const clearPaperBook = (): number => {
     const n = book.size;
