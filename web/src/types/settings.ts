@@ -98,6 +98,8 @@ export interface AutoClaimHistoryEntry {
   recipient: string;
   txHash?: string;
   txId?: string;
+  /** e.g. "100→200" */
+  stage?: string;
   baselineBefore: number;
   baselineAfter: number;
   cashBefore: number;

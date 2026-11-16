@@ -6,7 +6,7 @@ import {
     AUTO_CLAIM_HISTORY_LIMIT,
     AutoClaimHistoryEntry,
 } from '../models/autoClaimState';
-import { computeAutoClaim, snapBaseline } from '../utils/autoClaimMath';
+import { AUTO_CLAIM_STEP, computeAutoClaim, snapBaseline } from '../utils/autoClaimMath';
 import getMyBalance from '../utils/getMyBalance';
 import Logger from '../utils/logger';
 import { withdrawCollateralToWallet } from '../utils/withdrawCollateral';
@@ -184,15 +184,15 @@ export const runAutoClaimOnce = async (opts?: { force?: boolean }): Promise<void
 
         const plan = computeAutoClaim(balance, baseline);
 
-        if (plan.newBaseline !== baseline && !plan.shouldClaim) {
+        // Baseline may only advance on first-init (handled above) or after a payout.
+        // Never lower it — that would re-arm stages like 100→200.
+        if (plan.newBaseline > baseline && !plan.shouldClaim) {
             await saveState({ baseline: plan.newBaseline, lastCheckAt: new Date() });
-            if (plan.newBaseline < baseline) {
-                Logger.info(
-                    `Auto claim baseline ratcheted $${baseline.toFixed(2)} → $${plan.newBaseline.toFixed(
-                        2
-                    )} (cash $${balance.toFixed(2)})`
-                );
-            }
+            Logger.info(
+                `Auto claim baseline advanced $${baseline.toFixed(2)} → $${plan.newBaseline.toFixed(
+                    2
+                )} (cash $${balance.toFixed(2)})`
+            );
             return;
         }
 
@@ -200,16 +200,19 @@ export const runAutoClaimOnce = async (opts?: { force?: boolean }): Promise<void
             Logger.info(
                 `Auto claim check OK — cash $${balance.toFixed(2)}, baseline $${baseline.toFixed(
                     2
-                )}, next claim ≥ $${(baseline * 2).toFixed(2)}`
+                )}, next stage ${baseline}→${baseline * 2} at ≥ $${(baseline * 2).toFixed(2)} ` +
+                    `(payout $${(baseline - AUTO_CLAIM_STEP).toFixed(0)})`
             );
             return;
         }
 
         Logger.separator();
         Logger.info(
-            `AUTO-CLAIM: cash $${balance.toFixed(2)} ≥ 2× baseline $${baseline.toFixed(
+            `AUTO-CLAIM stage ${plan.stage}: cash $${balance.toFixed(2)} ≥ $${(baseline * 2).toFixed(
                 2
-            )} → pay out $${plan.payout.toFixed(2)} (${plan.levels} level(s)) to ${recipient}`
+            )} → pay $${plan.payout.toFixed(2)} to ${recipient} · baseline $${baseline.toFixed(
+                0
+            )} → $${plan.newBaseline.toFixed(0)}`
         );
 
         const result = await withdrawCollateralToWallet(plan.payout, recipient);
@@ -227,6 +230,7 @@ export const runAutoClaimOnce = async (opts?: { force?: boolean }): Promise<void
                 recipient,
                 txHash: result.txHash,
                 txId: result.txId,
+                stage: plan.stage || undefined,
                 baselineBefore: baseline,
                 baselineAfter: plan.newBaseline,
                 cashBefore: balance,
@@ -241,16 +245,20 @@ export const runAutoClaimOnce = async (opts?: { force?: boolean }): Promise<void
         );
 
         Logger.success(
-            `Auto claim paid $${plan.payout.toFixed(2)} → ${recipient}` +
+            `Auto claim ${plan.stage} paid $${plan.payout.toFixed(2)} → ${recipient}` +
                 (result.txHash ? ` tx=${result.txHash}` : result.txId ? ` relayer=${result.txId}` : '')
         );
         Logger.info(
-            `   Logged payout @ ${paidAt.toISOString()}` +
+            `   Logged @ ${paidAt.toISOString()}` +
                 (txRef ? ` · ${result.txHash ? 'tx' : 'relayer'}=${txRef}` : '')
         );
-        Logger.info(`   New baseline: $${plan.newBaseline.toFixed(2)} (next claim at ≥ $${(
-            plan.newBaseline * 2
-        ).toFixed(2)})`);
+        Logger.info(
+            `   New baseline: $${plan.newBaseline.toFixed(0)} · next ${plan.newBaseline}→${
+                plan.newBaseline * 2
+            } at ≥ $${(plan.newBaseline * 2).toFixed(0)} (payout $${(
+                plan.newBaseline - AUTO_CLAIM_STEP
+            ).toFixed(0)})`
+        );
         Logger.separator();
     } catch (error) {
         Logger.error(

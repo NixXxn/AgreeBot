@@ -7,6 +7,8 @@ export interface AutoClaimHistoryEntry {
     recipient: string;
     txHash?: string;
     txId?: string;
+    /** e.g. "100→200" */
+    stage?: string;
     baselineBefore: number;
     baselineAfter: number;
     cashBefore: number;
@@ -37,6 +39,7 @@ const historyEntrySchema = new Schema(
         recipient: { type: String, required: true },
         txHash: { type: String, required: false },
         txId: { type: String, required: false },
+        stage: { type: String, required: false },
         baselineBefore: { type: Number, required: true },
         baselineAfter: { type: Number, required: true },
         cashBefore: { type: Number, required: true },

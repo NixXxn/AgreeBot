@@ -12,6 +12,7 @@ export type AutoClaimHistoryEntryDto = {
   recipient: string;
   txHash?: string;
   txId?: string;
+  stage?: string;
   baselineBefore: number;
   baselineAfter: number;
   cashBefore: number;
@@ -40,6 +41,7 @@ type AutoClaimDoc = {
     recipient?: string;
     txHash?: string;
     txId?: string;
+    stage?: string;
     baselineBefore?: number;
     baselineAfter?: number;
     cashBefore?: number;
@@ -72,14 +74,20 @@ export async function GET() {
       const at = asIso(entry.at);
       const amountUsd = Number(entry.amountUsd);
       if (!at || !Number.isFinite(amountUsd)) continue;
+      const baselineBefore = Number(entry.baselineBefore) || 0;
+      const baselineAfter = Number(entry.baselineAfter) || 0;
+      const stage =
+        (entry.stage && String(entry.stage)) ||
+        (baselineBefore > 0 ? `${baselineBefore}→${baselineBefore * 2}` : undefined);
       history.push({
         at,
         amountUsd,
         recipient: String(entry.recipient || ''),
         txHash: entry.txHash ? String(entry.txHash) : undefined,
         txId: entry.txId ? String(entry.txId) : undefined,
-        baselineBefore: Number(entry.baselineBefore) || 0,
-        baselineAfter: Number(entry.baselineAfter) || 0,
+        stage,
+        baselineBefore,
+        baselineAfter,
         cashBefore: Number(entry.cashBefore) || 0,
       });
     }

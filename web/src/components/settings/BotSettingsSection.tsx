@@ -245,16 +245,21 @@ export function BotSettingsSection({
               checked={safe.autoClaimEnabled}
               onCheckedChange={(checked) => onBotSettingsChange({ autoClaimEnabled: checked })}
               label="Auto Claim"
-              description="Once per day (live only): when CLOB cash doubles the ladder baseline, withdraw winnings to PAYOUT_ADDRESS"
+              description="Once per day (live): 100→200 pay $50 · 150→300 pay $100 · 200→400 pay $150 · … Each stage fires only once; baseline never goes back."
             />
 
             {autoClaim && (
               <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">Baseline</p>
+                    <p className="text-xs text-muted-foreground">Baseline / next stage</p>
                     <p className="font-mono font-medium">
-                      ${autoClaim.baseline.toFixed(2)}
+                      ${autoClaim.baseline.toFixed(0)}
+                      {autoClaim.baseline >= 100
+                        ? ` → $${(autoClaim.baseline * 2).toFixed(0)} (pay $${(
+                            autoClaim.baseline - 50
+                          ).toFixed(0)})`
+                        : ''}
                     </p>
                   </div>
                   <div>
@@ -287,6 +292,7 @@ export function BotSettingsSection({
                         <thead>
                           <tr className="text-left text-xs text-muted-foreground border-b">
                             <th className="py-1.5 pr-3 font-medium">When</th>
+                            <th className="py-1.5 pr-3 font-medium">Stage</th>
                             <th className="py-1.5 pr-3 font-medium">Amount</th>
                             <th className="py-1.5 font-medium">Tx</th>
                           </tr>
@@ -295,10 +301,18 @@ export function BotSettingsSection({
                           {autoClaim.history.map((row, i) => {
                             const tx = row.txHash || row.txId;
                             const isHash = Boolean(row.txHash?.startsWith('0x'));
+                            const stage =
+                              row.stage ||
+                              (row.baselineBefore > 0
+                                ? `${row.baselineBefore}→${row.baselineBefore * 2}`
+                                : '—');
                             return (
                               <tr key={`${row.at}-${i}`} className="border-b border-border/50 last:border-0">
                                 <td className="py-2 pr-3 whitespace-nowrap align-top">
                                   {formatClaimTime(row.at)}
+                                </td>
+                                <td className="py-2 pr-3 font-mono align-top whitespace-nowrap">
+                                  {stage}
                                 </td>
                                 <td className="py-2 pr-3 font-mono align-top">
                                   ${row.amountUsd.toFixed(2)}
