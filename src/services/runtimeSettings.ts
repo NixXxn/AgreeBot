@@ -299,8 +299,14 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
         const n = parseInt(overrides.AUTO_CLAIM_INTERVAL, 10);
         if (Number.isFinite(n) && n > 0) ENV.AUTO_CLAIM_INTERVAL = n;
     }
-    if (overrides.AUTO_CLAIM_RECIPIENT !== undefined) {
-        ENV.AUTO_CLAIM_RECIPIENT = (overrides.AUTO_CLAIM_RECIPIENT || '').trim();
+    if (overrides.PAYOUT_ADDRESS !== undefined || overrides.AUTO_CLAIM_RECIPIENT !== undefined) {
+        const payout = (
+            overrides.PAYOUT_ADDRESS ||
+            overrides.AUTO_CLAIM_RECIPIENT ||
+            ''
+        ).trim();
+        ENV.PAYOUT_ADDRESS = payout;
+        ENV.AUTO_CLAIM_RECIPIENT = payout;
     }
 
     if (overrides.CONSENSUS_MIN_AGREEMENT) {

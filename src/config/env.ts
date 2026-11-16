@@ -459,8 +459,22 @@ export const ENV = {
      */
     AUTO_CLAIM_ENABLED: process.env.AUTO_CLAIM_ENABLED !== 'false',
     AUTO_CLAIM_INTERVAL: parseInt(process.env.AUTO_CLAIM_INTERVAL || '120', 10),
-    /** Optional payout destination; defaults to signer address from PRIVATE_KEY. */
-    AUTO_CLAIM_RECIPIENT: (process.env.AUTO_CLAIM_RECIPIENT || '').trim(),
+    /**
+     * Optional auto-claim payout destination (EOA that receives withdrawn USDC/pUSD).
+     * PAYOUT_ADDRESS is the preferred alias; AUTO_CLAIM_RECIPIENT is legacy.
+     * Defaults to signer address from PRIVATE_KEY / POLY_PRIVATE_KEY when empty.
+     */
+    AUTO_CLAIM_RECIPIENT: (
+        process.env.PAYOUT_ADDRESS ||
+        process.env.AUTO_CLAIM_RECIPIENT ||
+        ''
+    ).trim(),
+    /** Preferred alias for AUTO_CLAIM_RECIPIENT. */
+    PAYOUT_ADDRESS: (
+        process.env.PAYOUT_ADDRESS ||
+        process.env.AUTO_CLAIM_RECIPIENT ||
+        ''
+    ).trim(),
     // Consensus / multi-trader agreement settings
     CONSENSUS_ENABLED: process.env.CONSENSUS_ENABLED === 'true',
     CONSENSUS_MIN_AGREEMENT: parseInt(process.env.CONSENSUS_MIN_AGREEMENT || '2', 10),

@@ -15,7 +15,7 @@ export const stopAutoClaim = () => {
 };
 
 const resolveRecipient = (): string | null => {
-    const configured = (ENV.AUTO_CLAIM_RECIPIENT || '').trim();
+    const configured = (ENV.PAYOUT_ADDRESS || ENV.AUTO_CLAIM_RECIPIENT || '').trim();
     if (configured && ethers.utils.isAddress(configured)) {
         return ethers.utils.getAddress(configured);
     }
@@ -76,7 +76,7 @@ export const runAutoClaimOnce = async (): Promise<void> => {
         const recipient = resolveRecipient();
         if (!recipient) {
             Logger.warning(
-                'Auto claim skipped — set AUTO_CLAIM_RECIPIENT or PRIVATE_KEY / POLY_PRIVATE_KEY'
+                'Auto claim skipped — set PAYOUT_ADDRESS (or AUTO_CLAIM_RECIPIENT) or PRIVATE_KEY / POLY_PRIVATE_KEY'
             );
             return;
         }
