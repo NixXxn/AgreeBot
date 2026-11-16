@@ -74,6 +74,15 @@ const isInsufficientBalanceOrAllowanceError = (message: string | undefined): boo
     return lower.includes('not enough balance') || lower.includes('allowance');
 };
 
+/** CLOB rejects prices outside [0.01, 0.99] — bids at $0.999 crash the executor. */
+const CLOB_MIN_PRICE = 0.01;
+const CLOB_MAX_PRICE = 0.99;
+
+const clampClobPrice = (price: number): number => {
+    if (!Number.isFinite(price)) return CLOB_MIN_PRICE;
+    return Math.min(CLOB_MAX_PRICE, Math.max(CLOB_MIN_PRICE, price));
+};
+
 export interface PostOrderResult {
     executed: boolean;
     sizeUsd: number;
@@ -269,28 +278,46 @@ const postOrder = async (
                 return parseFloat(bid.price) > parseFloat(max.price) ? bid : max;
             }, orderBook.bids[0]);
 
-            Logger.info(`Best bid: ${maxPriceBid.size} @ $${maxPriceBid.price}`);
+            const rawBid = parseFloat(maxPriceBid.price);
+            const sellPrice = clampClobPrice(rawBid);
+            Logger.info(
+                `Best bid: ${maxPriceBid.size} @ $${rawBid.toFixed(4)}` +
+                    (sellPrice !== rawBid
+                        ? ` → clamped $${sellPrice.toFixed(4)} (CLOB 0.01–0.99)`
+                        : '')
+            );
             let order_arges;
             if (remaining <= parseFloat(maxPriceBid.size)) {
                 order_arges = {
                     side: Side.SELL,
                     tokenID: my_position.asset,
                     amount: remaining,
-                    price: parseFloat(maxPriceBid.price),
+                    price: sellPrice,
                 };
             } else {
                 order_arges = {
                     side: Side.SELL,
                     tokenID: my_position.asset,
                     amount: parseFloat(maxPriceBid.size),
-                    price: parseFloat(maxPriceBid.price),
+                    price: sellPrice,
                 };
             }
-            const resp = await clobClient.createAndPostMarketOrder(
-                order_arges,
-                undefined,
-                OrderType.FOK
-            );
+            let resp;
+            try {
+                resp = await clobClient.createAndPostMarketOrder(
+                    order_arges,
+                    undefined,
+                    OrderType.FOK
+                );
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                Logger.error(`MERGE/SELL order threw: ${msg}`);
+                await UserActivity.updateOne(
+                    { _id: trade._id },
+                    { bot: true, botExcutedTime: RETRY_LIMIT }
+                );
+                return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
+            }
             if (resp.success === true) {
                 retry = 0;
                 filledUsd += order_arges.amount * order_arges.price;
@@ -548,21 +575,38 @@ const postOrder = async (
                 break;
             }
 
+            const buyPrice = clampClobPrice(askPrice);
+            if (buyPrice !== askPrice) {
+                Logger.info(
+                    `Clamped ask $${askPrice.toFixed(4)} → $${buyPrice.toFixed(4)} (CLOB 0.01–0.99)`
+                );
+            }
             const order_arges = {
                 side: Side.BUY,
                 tokenID: trade.asset,
                 amount: orderSize,
-                price: askPrice,
+                price: buyPrice,
             };
 
             Logger.info(
-                `Creating order: $${orderSize.toFixed(2)} @ $${askPrice} (Balance: $${my_balance.toFixed(2)})`
+                `Creating order: $${orderSize.toFixed(2)} @ $${buyPrice} (Balance: $${my_balance.toFixed(2)})`
             );
-            const resp = await clobClient.createAndPostMarketOrder(
-                order_arges,
-                undefined,
-                OrderType.FOK
-            );
+            let resp;
+            try {
+                resp = await clobClient.createAndPostMarketOrder(
+                    order_arges,
+                    undefined,
+                    OrderType.FOK
+                );
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                Logger.error(`BUY order threw: ${msg}`);
+                await UserActivity.updateOne(
+                    { _id: trade._id },
+                    { bot: true, botExcutedTime: RETRY_LIMIT, myBoughtSize: totalBoughtTokens }
+                );
+                return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
+            }
             if (resp.success === true) {
                 retry = 0;
                 const tokensBought = order_arges.amount / order_arges.price;
@@ -726,7 +770,14 @@ const postOrder = async (
                 return parseFloat(bid.price) > parseFloat(max.price) ? bid : max;
             }, orderBook.bids[0]);
 
-            Logger.info(`Best bid: ${maxPriceBid.size} @ $${maxPriceBid.price}`);
+            const rawBid = parseFloat(maxPriceBid.price);
+            const sellPrice = clampClobPrice(rawBid);
+            Logger.info(
+                `Best bid: ${maxPriceBid.size} @ $${rawBid.toFixed(4)}` +
+                    (sellPrice !== rawBid
+                        ? ` → clamped $${sellPrice.toFixed(4)} (CLOB 0.01–0.99)`
+                        : '')
+            );
 
             // Check if remaining amount is below minimum before creating order
             if (remaining < MIN_ORDER_SIZE_TOKENS) {
@@ -752,13 +803,24 @@ const postOrder = async (
                 side: Side.SELL,
                 tokenID: trade.asset,
                 amount: sellAmount,
-                price: parseFloat(maxPriceBid.price),
+                price: sellPrice,
             };
-            const resp = await clobClient.createAndPostMarketOrder(
-                order_arges,
-                undefined,
-                OrderType.FOK
-            );
+            let resp;
+            try {
+                resp = await clobClient.createAndPostMarketOrder(
+                    order_arges,
+                    undefined,
+                    OrderType.FOK
+                );
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                Logger.error(`SELL order threw: ${msg}`);
+                await UserActivity.updateOne(
+                    { _id: trade._id },
+                    { bot: true, botExcutedTime: RETRY_LIMIT }
+                );
+                return { executed: filledUsd > 0, sizeUsd: filledUsd, paper: false };
+            }
             if (resp.success === true) {
                 retry = 0;
                 totalSoldTokens += order_arges.amount;

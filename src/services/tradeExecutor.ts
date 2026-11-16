@@ -475,142 +475,156 @@ const tradeExecutor = async (_initialClient?: ClobClient | null) => {
     let lastCheck = Date.now();
     let lastModeWasPaper = ENV.PAPER_MODE;
     while (isRunning) {
-        // Recreate CLOB client when Settings flips paper → live without restart
-        if (ENV.PAPER_MODE !== lastModeWasPaper) {
-            Logger.info(
-                `Trading mode changed → ${ENV.PAPER_MODE ? 'paper' : 'live'}; refreshing CLOB client`
-            );
-            lastModeWasPaper = ENV.PAPER_MODE;
-        }
-        // Queue / consensus must not wait on CLOB init — otherwise monitor
-        // keeps saving trades while this loop is stuck and never starts consensus.
-        const trades = await readTempTrades();
-        const clobClient = await ensureClobClient();
-
-        // --- Consensus path ---
-        if (ENV.CONSENSUS_ENABLED && trades.length > 0) {
-            const consensusTrades: TradeWithUser[] = [];
-            const immediateTrades: TradeWithUser[] = [];
-
-            for (const trade of trades) {
-                if (shouldUseConsensus(trade.side)) {
-                    consensusTrades.push(trade);
-                } else {
-                    immediateTrades.push(trade);
-                }
-            }
-
-            if (consensusTrades.length > 0) {
-                Logger.clearLine();
+        try {
+            // Recreate CLOB client when Settings flips paper → live without restart
+            if (ENV.PAPER_MODE !== lastModeWasPaper) {
                 Logger.info(
-                    `📥 ${consensusTrades.length} trade(s) queued for consensus ` +
-                        `(need ${ENV.CONSENSUS_MIN_AGREEMENT} agreeing traders on the same outcome)`
+                    `Trading mode changed → ${ENV.PAPER_MODE ? 'paper' : 'live'}; refreshing CLOB client`
                 );
-                for (const trade of consensusTrades) {
-                    await claimForConsensus(trade);
+                lastModeWasPaper = ENV.PAPER_MODE;
+            }
+            // Queue / consensus must not wait on CLOB init — otherwise monitor
+            // keeps saving trades while this loop is stuck and never starts consensus.
+            const trades = await readTempTrades();
+            const clobClient = await ensureClobClient();
+
+            // --- Consensus path ---
+            if (ENV.CONSENSUS_ENABLED && trades.length > 0) {
+                const consensusTrades: TradeWithUser[] = [];
+                const immediateTrades: TradeWithUser[] = [];
+
+                for (const trade of trades) {
+                    if (shouldUseConsensus(trade.side)) {
+                        consensusTrades.push(trade);
+                    } else {
+                        immediateTrades.push(trade);
+                    }
                 }
-            }
 
-            if (immediateTrades.length > 0 && consensusTrades.length === 0) {
-                Logger.info(
-                    `${immediateTrades.length} trade(s) bypass consensus ` +
-                        `(APPLY_TO=${ENV.CONSENSUS_APPLY_TO} — e.g. SELLs run immediately)`
-                );
-            }
+                if (consensusTrades.length > 0) {
+                    Logger.clearLine();
+                    Logger.info(
+                        `📥 ${consensusTrades.length} trade(s) queued for consensus ` +
+                            `(need ${ENV.CONSENSUS_MIN_AGREEMENT} agreeing traders on the same outcome)`
+                    );
+                    for (const trade of consensusTrades) {
+                        await claimForConsensus(trade);
+                    }
+                }
 
-            // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) execute normally
-            if (immediateTrades.length > 0) {
-                if (ENV.TRADE_AGGREGATION_ENABLED) {
-                    for (const trade of immediateTrades) {
+                if (immediateTrades.length > 0 && consensusTrades.length === 0) {
+                    Logger.info(
+                        `${immediateTrades.length} trade(s) bypass consensus ` +
+                            `(APPLY_TO=${ENV.CONSENSUS_APPLY_TO} — e.g. SELLs run immediately)`
+                    );
+                }
+
+                // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) execute normally
+                if (immediateTrades.length > 0) {
+                    if (ENV.TRADE_AGGREGATION_ENABLED) {
+                        for (const trade of immediateTrades) {
+                            if (
+                                trade.side === 'BUY' &&
+                                trade.usdcSize < TRADE_AGGREGATION_MIN_TOTAL_USD
+                            ) {
+                                addToAggregationBuffer(trade);
+                            } else {
+                                await doTrading(clobClient, [trade]);
+                            }
+                        }
+                    } else {
+                        await doTrading(clobClient, immediateTrades);
+                    }
+                }
+
+                lastCheck = Date.now();
+            } else if (!ENV.CONSENSUS_ENABLED && ENV.TRADE_AGGREGATION_ENABLED) {
+                // Process with aggregation logic (original)
+                if (trades.length > 0) {
+                    Logger.clearLine();
+                    Logger.info(
+                        `📥 ${trades.length} new trade${trades.length > 1 ? 's' : ''} detected`
+                    );
+
+                    // Add trades to aggregation buffer
+                    for (const trade of trades) {
+                        // Only aggregate BUY trades below minimum threshold
                         if (trade.side === 'BUY' && trade.usdcSize < TRADE_AGGREGATION_MIN_TOTAL_USD) {
+                            Logger.info(
+                                `Adding $${trade.usdcSize.toFixed(2)} ${trade.side} trade to aggregation buffer for ${trade.slug || trade.asset}`
+                            );
                             addToAggregationBuffer(trade);
                         } else {
+                            // Execute large trades immediately (not aggregated)
+                            Logger.clearLine();
+                            Logger.header(`⚡ IMMEDIATE TRADE (above threshold)`);
                             await doTrading(clobClient, [trade]);
                         }
                     }
-                } else {
-                    await doTrading(clobClient, immediateTrades);
+                    lastCheck = Date.now();
+                }
+            } else if (!ENV.CONSENSUS_ENABLED) {
+                // Original non-aggregation logic
+                if (trades.length > 0) {
+                    Logger.clearLine();
+                    Logger.header(
+                        `⚡ ${trades.length} NEW TRADE${trades.length > 1 ? 'S' : ''} TO COPY`
+                    );
+                    await doTrading(clobClient, trades);
+                    lastCheck = Date.now();
                 }
             }
 
-            lastCheck = Date.now();
-        } else if (!ENV.CONSENSUS_ENABLED && ENV.TRADE_AGGREGATION_ENABLED) {
-            // Process with aggregation logic (original)
-            if (trades.length > 0) {
-                Logger.clearLine();
-                Logger.info(
-                    `📥 ${trades.length} new trade${trades.length > 1 ? 's' : ''} detected`
-                );
-
-                // Add trades to aggregation buffer
-                for (const trade of trades) {
-                    // Only aggregate BUY trades below minimum threshold
-                    if (trade.side === 'BUY' && trade.usdcSize < TRADE_AGGREGATION_MIN_TOTAL_USD) {
-                        Logger.info(
-                            `Adding $${trade.usdcSize.toFixed(2)} ${trade.side} trade to aggregation buffer for ${trade.slug || trade.asset}`
-                        );
-                        addToAggregationBuffer(trade);
-                    } else {
-                        // Execute large trades immediately (not aggregated)
-                        Logger.clearLine();
-                        Logger.header(`⚡ IMMEDIATE TRADE (above threshold)`);
-                        await doTrading(clobClient, [trade]);
-                    }
-                }
-                lastCheck = Date.now();
-            }
-        } else if (!ENV.CONSENSUS_ENABLED) {
-            // Original non-aggregation logic
-            if (trades.length > 0) {
-                Logger.clearLine();
-                Logger.header(
-                    `⚡ ${trades.length} NEW TRADE${trades.length > 1 ? 'S' : ''} TO COPY`
-                );
-                await doTrading(clobClient, trades);
-                lastCheck = Date.now();
-            }
-        }
-
-        // Evaluate consensus buffer every loop
-        if (ENV.CONSENSUS_ENABLED) {
-            const { ready } = await evaluateConsensusBuffer();
-            if (ready.length > 0) {
-                Logger.clearLine();
-                await doConsensusTrading(clobClient, ready);
-                lastCheck = Date.now();
-            }
-        }
-
-        // Check for ready aggregated trades
-        if (ENV.TRADE_AGGREGATION_ENABLED) {
-            const readyAggregations = getReadyAggregatedTrades();
-            if (readyAggregations.length > 0) {
-                Logger.clearLine();
-                Logger.header(
-                    `⚡ ${readyAggregations.length} AGGREGATED TRADE${readyAggregations.length > 1 ? 'S' : ''} READY`
-                );
-                await doAggregatedTrading(clobClient, readyAggregations);
-                lastCheck = Date.now();
-            }
-        }
-
-        // Waiting message
-        if (Date.now() - lastCheck > 300) {
-            const pendingParts: string[] = [];
+            // Evaluate consensus buffer every loop
             if (ENV.CONSENSUS_ENABLED) {
-                const n = getConsensusBufferSize();
-                if (n > 0) pendingParts.push(`${n} consensus group(s)`);
+                const { ready } = await evaluateConsensusBuffer();
+                if (ready.length > 0) {
+                    Logger.clearLine();
+                    await doConsensusTrading(clobClient, ready);
+                    lastCheck = Date.now();
+                }
             }
-            if (ENV.TRADE_AGGREGATION_ENABLED && tradeAggregationBuffer.size > 0) {
-                pendingParts.push(`${tradeAggregationBuffer.size} aggregation(s)`);
+
+            // Check for ready aggregated trades
+            if (ENV.TRADE_AGGREGATION_ENABLED) {
+                const readyAggregations = getReadyAggregatedTrades();
+                if (readyAggregations.length > 0) {
+                    Logger.clearLine();
+                    Logger.header(
+                        `⚡ ${readyAggregations.length} AGGREGATED TRADE${readyAggregations.length > 1 ? 'S' : ''} READY`
+                    );
+                    await doAggregatedTrading(clobClient, readyAggregations);
+                    lastCheck = Date.now();
+                }
             }
-            const traderCount = getUserAddresses().length;
-            if (pendingParts.length > 0) {
-                Logger.waiting(traderCount, pendingParts.join(', '));
-            } else {
-                Logger.waiting(traderCount);
+
+            // Waiting message
+            if (Date.now() - lastCheck > 300) {
+                const pendingParts: string[] = [];
+                if (ENV.CONSENSUS_ENABLED) {
+                    const n = getConsensusBufferSize();
+                    if (n > 0) pendingParts.push(`${n} consensus group(s)`);
+                }
+                if (ENV.TRADE_AGGREGATION_ENABLED && tradeAggregationBuffer.size > 0) {
+                    pendingParts.push(`${tradeAggregationBuffer.size} aggregation(s)`);
+                }
+                const traderCount = getUserAddresses().length;
+                if (pendingParts.length > 0) {
+                    Logger.waiting(traderCount, pendingParts.join(', '));
+                } else {
+                    Logger.waiting(traderCount);
+                }
+                lastCheck = Date.now();
             }
-            lastCheck = Date.now();
+        } catch (error) {
+            // Never let a single order/API failure kill the consensus loop —
+            // monitor would keep saving trades while executor is dead.
+            Logger.error(
+                `Trade executor loop error (continuing): ${
+                    error instanceof Error ? error.message : String(error)
+                }`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 
         if (!isRunning) break;
