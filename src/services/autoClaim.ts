@@ -1,10 +1,20 @@
 import { ethers } from 'ethers';
 import { ENV } from '../config/env';
-import { AutoClaimState, AUTO_CLAIM_STATE_ID } from '../models/autoClaimState';
+import {
+    AutoClaimState,
+    AUTO_CLAIM_STATE_ID,
+    AUTO_CLAIM_HISTORY_LIMIT,
+    AutoClaimHistoryEntry,
+} from '../models/autoClaimState';
 import { computeAutoClaim, snapBaseline } from '../utils/autoClaimMath';
 import getMyBalance from '../utils/getMyBalance';
 import Logger from '../utils/logger';
 import { withdrawCollateralToWallet } from '../utils/withdrawCollateral';
+
+/** Default: once per day. */
+const DEFAULT_INTERVAL_SECONDS = 24 * 60 * 60;
+/** Wake often enough to honor Settings enable/disable without waiting a full day. */
+const LOOP_WAKE_SECONDS = 60 * 60;
 
 let isRunning = true;
 let claimInFlight = false;
@@ -30,16 +40,25 @@ const resolveRecipient = (): string | null => {
     }
 };
 
-const loadBaseline = async (): Promise<number> => {
+const loadState = async (): Promise<{ baseline: number; lastCheckAt: Date | null }> => {
     const doc = (await AutoClaimState.findById(AUTO_CLAIM_STATE_ID).lean().exec()) as {
         baseline?: number;
+        lastCheckAt?: Date | string;
     } | null;
-    if (!doc) return 0;
-    return typeof doc.baseline === 'number' && Number.isFinite(doc.baseline) ? doc.baseline : 0;
+    if (!doc) return { baseline: 0, lastCheckAt: null };
+    const baseline =
+        typeof doc.baseline === 'number' && Number.isFinite(doc.baseline) ? doc.baseline : 0;
+    let lastCheckAt: Date | null = null;
+    if (doc.lastCheckAt) {
+        const d = doc.lastCheckAt instanceof Date ? doc.lastCheckAt : new Date(doc.lastCheckAt);
+        if (!Number.isNaN(d.getTime())) lastCheckAt = d;
+    }
+    return { baseline, lastCheckAt };
 };
 
-const saveBaseline = async (fields: {
-    baseline: number;
+const saveState = async (fields: {
+    baseline?: number;
+    lastCheckAt?: Date;
     lastPayoutUsd?: number;
     lastRecipient?: string;
     lastTxId?: string;
@@ -51,22 +70,76 @@ const saveBaseline = async (fields: {
                 ...fields,
                 updatedAt: new Date(),
             },
+            $setOnInsert: { _id: AUTO_CLAIM_STATE_ID, baseline: fields.baseline ?? 0 },
+        },
+        { upsert: true }
+    );
+};
+
+const appendHistory = async (
+    entry: AutoClaimHistoryEntry,
+    fields: {
+        baseline: number;
+        lastCheckAt: Date;
+        lastPayoutUsd: number;
+        lastRecipient: string;
+        lastTxId?: string;
+    }
+): Promise<void> => {
+    await AutoClaimState.findByIdAndUpdate(
+        AUTO_CLAIM_STATE_ID,
+        {
+            $set: {
+                ...fields,
+                updatedAt: new Date(),
+            },
+            $push: {
+                history: {
+                    $each: [entry],
+                    $position: 0,
+                    $slice: AUTO_CLAIM_HISTORY_LIMIT,
+                },
+            },
             $setOnInsert: { _id: AUTO_CLAIM_STATE_ID },
         },
         { upsert: true }
     );
 };
 
+const claimIntervalSeconds = (): number => {
+    const n = ENV.AUTO_CLAIM_INTERVAL;
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_INTERVAL_SECONDS;
+};
+
 /**
  * One auto-claim pass: read CLOB cash, apply doubling ladder, withdraw to connected wallet.
+ * At most once per AUTO_CLAIM_INTERVAL (default 24h), tracked via lastCheckAt in Mongo.
  */
-export const runAutoClaimOnce = async (): Promise<void> => {
+export const runAutoClaimOnce = async (opts?: { force?: boolean }): Promise<void> => {
     if (ENV.PAPER_MODE) return;
     if (!ENV.AUTO_CLAIM_ENABLED) return;
     if (claimInFlight) return;
 
     claimInFlight = true;
     try {
+        const intervalSec = claimIntervalSeconds();
+        const { baseline: storedBaseline, lastCheckAt } = await loadState();
+
+        if (!opts?.force && lastCheckAt) {
+            const elapsedMs = Date.now() - lastCheckAt.getTime();
+            if (elapsedMs < intervalSec * 1000) {
+                const hoursLeft = ((intervalSec * 1000 - elapsedMs) / 3_600_000).toFixed(1);
+                Logger.info(
+                    `Auto claim skipped — next check in ~${hoursLeft}h ` +
+                        `(once every ${Math.round(intervalSec / 3600)}h)`
+                );
+                return;
+            }
+        }
+
+        // Mark this calendar check immediately so crashes mid-run don't spam retries.
+        await saveState({ lastCheckAt: new Date(), baseline: storedBaseline });
+
         const funder = ENV.PROXY_WALLET?.trim();
         if (!funder) {
             Logger.warning('Auto claim skipped — PROXY_WALLET / POLY_FUNDER not set');
@@ -89,13 +162,13 @@ export const runAutoClaimOnce = async (): Promise<void> => {
         }
 
         const balance = await getMyBalance(funder);
-        let baseline = await loadBaseline();
+        let baseline = storedBaseline;
 
         // Initialize baseline on first run without paying out.
         if (baseline <= 0) {
             const snapped = snapBaseline(balance);
             if (snapped > 0) {
-                await saveBaseline({ baseline: snapped });
+                await saveState({ baseline: snapped, lastCheckAt: new Date() });
                 Logger.info(
                     `Auto claim baseline initialized at $${snapped.toFixed(2)} (cash $${balance.toFixed(
                         2
@@ -112,7 +185,7 @@ export const runAutoClaimOnce = async (): Promise<void> => {
         const plan = computeAutoClaim(balance, baseline);
 
         if (plan.newBaseline !== baseline && !plan.shouldClaim) {
-            await saveBaseline({ baseline: plan.newBaseline });
+            await saveState({ baseline: plan.newBaseline, lastCheckAt: new Date() });
             if (plan.newBaseline < baseline) {
                 Logger.info(
                     `Auto claim baseline ratcheted $${baseline.toFixed(2)} → $${plan.newBaseline.toFixed(
@@ -124,6 +197,11 @@ export const runAutoClaimOnce = async (): Promise<void> => {
         }
 
         if (!plan.shouldClaim) {
+            Logger.info(
+                `Auto claim check OK — cash $${balance.toFixed(2)}, baseline $${baseline.toFixed(
+                    2
+                )}, next claim ≥ $${(baseline * 2).toFixed(2)}`
+            );
             return;
         }
 
@@ -140,16 +218,35 @@ export const runAutoClaimOnce = async (): Promise<void> => {
             return;
         }
 
-        await saveBaseline({
-            baseline: plan.newBaseline,
-            lastPayoutUsd: plan.payout,
-            lastRecipient: recipient,
-            lastTxId: result.txId || result.txHash,
-        });
+        const paidAt = new Date();
+        const txRef = result.txHash || result.txId || '';
+        await appendHistory(
+            {
+                at: paidAt,
+                amountUsd: plan.payout,
+                recipient,
+                txHash: result.txHash,
+                txId: result.txId,
+                baselineBefore: baseline,
+                baselineAfter: plan.newBaseline,
+                cashBefore: balance,
+            },
+            {
+                baseline: plan.newBaseline,
+                lastCheckAt: paidAt,
+                lastPayoutUsd: plan.payout,
+                lastRecipient: recipient,
+                lastTxId: txRef || undefined,
+            }
+        );
 
         Logger.success(
             `Auto claim paid $${plan.payout.toFixed(2)} → ${recipient}` +
                 (result.txHash ? ` tx=${result.txHash}` : result.txId ? ` relayer=${result.txId}` : '')
+        );
+        Logger.info(
+            `   Logged payout @ ${paidAt.toISOString()}` +
+                (txRef ? ` · ${result.txHash ? 'tx' : 'relayer'}=${txRef}` : '')
         );
         Logger.info(`   New baseline: $${plan.newBaseline.toFixed(2)} (next claim at ≥ $${(
             plan.newBaseline * 2
@@ -165,13 +262,10 @@ export const runAutoClaimOnce = async (): Promise<void> => {
 };
 
 const autoClaim = async () => {
-    if (!ENV.AUTO_CLAIM_ENABLED) {
-        Logger.info('Auto claim is disabled');
-        return;
-    }
-
+    const hours = Math.round(claimIntervalSeconds() / 3600);
     Logger.success(
-        `Auto claim started (every ${ENV.AUTO_CLAIM_INTERVAL}s) — double ladder, payout to connected wallet`
+        `Auto claim loop started — checks at most once every ${hours}h ` +
+            `(enable/disable from Settings; wake every ${LOOP_WAKE_SECONDS / 60}m)`
     );
     Logger.info('   Rule: 100→200 pay $50 · 150→300 pay $100 · 200→400 pay $150 · …');
 
@@ -186,7 +280,9 @@ const autoClaim = async () => {
         }
 
         if (!isRunning) break;
-        await new Promise((resolve) => setTimeout(resolve, ENV.AUTO_CLAIM_INTERVAL * 1000));
+        // Wake hourly so Settings toggles apply without waiting a full day.
+        const wakeSec = Math.min(LOOP_WAKE_SECONDS, Math.max(60, claimIntervalSeconds()));
+        await new Promise((resolve) => setTimeout(resolve, wakeSec * 1000));
     }
 
     Logger.info('Auto claim stopped');

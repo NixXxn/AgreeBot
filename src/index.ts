@@ -136,16 +136,14 @@ export const main = async () => {
             Logger.info('Auto resolver disabled');
         }
 
-        if (!ENV.PAPER_MODE && ENV.AUTO_CLAIM_ENABLED) {
-            Logger.info('Starting auto claim (live winnings → connected wallet)...');
-            autoClaim();
-        } else {
-            Logger.info(
-                ENV.PAPER_MODE
-                    ? 'Auto claim skipped (paper mode)'
-                    : 'Auto claim disabled (AUTO_CLAIM_ENABLED=false)'
-            );
-        }
+        // Always start the loop so Settings can enable/disable without restart.
+        // Checks run at most once per AUTO_CLAIM_INTERVAL (default 24h) when live + enabled.
+        Logger.info(
+            ENV.AUTO_CLAIM_ENABLED
+                ? 'Starting auto claim loop (at most once per day when live)...'
+                : 'Auto claim loop idle (disabled in Settings / AUTO_CLAIM_ENABLED=false)'
+        );
+        autoClaim();
 
         // Pick up dashboard Settings changes even if the save-time notify missed
         setInterval(() => {

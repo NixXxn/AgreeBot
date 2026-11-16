@@ -458,7 +458,8 @@ export const ENV = {
      * Default on unless explicitly set to false.
      */
     AUTO_CLAIM_ENABLED: process.env.AUTO_CLAIM_ENABLED !== 'false',
-    AUTO_CLAIM_INTERVAL: parseInt(process.env.AUTO_CLAIM_INTERVAL || '120', 10),
+    /** Seconds between auto-claim cash checks. Default 86400 = once per day. */
+    AUTO_CLAIM_INTERVAL: parseInt(process.env.AUTO_CLAIM_INTERVAL || '86400', 10),
     /**
      * Optional auto-claim payout destination (EOA that receives withdrawn USDC/pUSD).
      * PAYOUT_ADDRESS is the preferred alias; AUTO_CLAIM_RECIPIENT is legacy.

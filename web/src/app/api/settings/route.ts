@@ -154,6 +154,7 @@ function envToSettings(env: Record<string, string>): BotSettings {
       consensusSizeMode: (['AVERAGE', 'LARGEST', 'FIRST', 'MEDIAN'].includes((env.CONSENSUS_SIZE_MODE || 'AVERAGE').toUpperCase())
         ? (env.CONSENSUS_SIZE_MODE || 'AVERAGE').toUpperCase()
         : 'AVERAGE') as BotSettings['botSettings']['consensusSizeMode'],
+      autoClaimEnabled: env.AUTO_CLAIM_ENABLED !== 'false',
     },
     network: {
       requestTimeoutMs: parseInt(env.REQUEST_TIMEOUT_MS || '10000', 10),
@@ -345,6 +346,9 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
     }
     if (update.botSettings.consensusSizeMode !== undefined) {
       envUpdates.CONSENSUS_SIZE_MODE = update.botSettings.consensusSizeMode;
+    }
+    if (update.botSettings.autoClaimEnabled !== undefined) {
+      envUpdates.AUTO_CLAIM_ENABLED = update.botSettings.autoClaimEnabled.toString();
     }
   }
 

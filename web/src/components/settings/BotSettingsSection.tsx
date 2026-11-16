@@ -5,15 +5,32 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
-import { BotSettings, BalanceInfo } from '@/types/settings';
+import { BotSettings, BalanceInfo, AutoClaimStatus } from '@/types/settings';
 
 interface BotSettingsSectionProps {
   botSettings: BotSettings['botSettings'];
   network: BotSettings['network'];
   wallet: BotSettings['wallet'];
   balance: BalanceInfo | null;
+  autoClaim: AutoClaimStatus | null;
   onBotSettingsChange: (update: Partial<BotSettings['botSettings']>) => void;
   onNetworkChange: (update: Partial<BotSettings['network']>) => void;
+}
+
+function formatClaimTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function truncateHash(value: string): string {
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
 export function BotSettingsSection({
@@ -21,6 +38,7 @@ export function BotSettingsSection({
   network,
   wallet,
   balance,
+  autoClaim,
   onBotSettingsChange,
   onNetworkChange,
 }: BotSettingsSectionProps) {
@@ -35,6 +53,7 @@ export function BotSettingsSection({
     consensusWindowSeconds: botSettings?.consensusWindowSeconds ?? 300,
     consensusApplyTo: botSettings?.consensusApplyTo ?? 'BUY',
     consensusSizeMode: botSettings?.consensusSizeMode ?? 'AVERAGE',
+    autoClaimEnabled: botSettings?.autoClaimEnabled !== false,
     fetchInterval: botSettings?.fetchInterval ?? 1,
     tooOldTimestamp: botSettings?.tooOldTimestamp ?? 24,
     retryLimit: botSettings?.retryLimit ?? 3,
@@ -217,6 +236,102 @@ export function BotSettingsSection({
                     { value: 'FIRST', label: 'First trader in window' },
                   ]}
                 />
+              </div>
+            )}
+          </div>
+
+          <div className="border-t pt-4 space-y-4">
+            <Switch
+              checked={safe.autoClaimEnabled}
+              onCheckedChange={(checked) => onBotSettingsChange({ autoClaimEnabled: checked })}
+              label="Auto Claim"
+              description="Once per day (live only): when CLOB cash doubles the ladder baseline, withdraw winnings to PAYOUT_ADDRESS"
+            />
+
+            {autoClaim && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Baseline</p>
+                    <p className="font-mono font-medium">
+                      ${autoClaim.baseline.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Last check</p>
+                    <p className="font-medium">
+                      {autoClaim.lastCheckAt
+                        ? formatClaimTime(autoClaim.lastCheckAt)
+                        : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Last payout</p>
+                    <p className="font-mono font-medium">
+                      {autoClaim.lastPayoutUsd != null
+                        ? `$${autoClaim.lastPayoutUsd.toFixed(2)}`
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Payout history (persisted)
+                  </p>
+                  {autoClaim.history.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No auto-claims yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-muted-foreground border-b">
+                            <th className="py-1.5 pr-3 font-medium">When</th>
+                            <th className="py-1.5 pr-3 font-medium">Amount</th>
+                            <th className="py-1.5 font-medium">Tx</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {autoClaim.history.map((row, i) => {
+                            const tx = row.txHash || row.txId;
+                            const isHash = Boolean(row.txHash?.startsWith('0x'));
+                            return (
+                              <tr key={`${row.at}-${i}`} className="border-b border-border/50 last:border-0">
+                                <td className="py-2 pr-3 whitespace-nowrap align-top">
+                                  {formatClaimTime(row.at)}
+                                </td>
+                                <td className="py-2 pr-3 font-mono align-top">
+                                  ${row.amountUsd.toFixed(2)}
+                                </td>
+                                <td className="py-2 align-top">
+                                  {tx ? (
+                                    isHash ? (
+                                      <a
+                                        href={`https://polygonscan.com/tx/${row.txHash}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                                        title={row.txHash}
+                                      >
+                                        {truncateHash(row.txHash!)}
+                                      </a>
+                                    ) : (
+                                      <code className="text-xs font-mono" title={tx}>
+                                        {truncateHash(tx)}
+                                      </code>
+                                    )
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

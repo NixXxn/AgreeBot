@@ -514,18 +514,7 @@ const checkAndResolvePositions = async (clobClient: ClobClient): Promise<void> =
             Logger.info(`   Redeemed on-chain: ${totalRedeemed.toFixed(2)} tokens`);
         }
         Logger.info(`   Total proceeds: ~$${totalProceeds.toFixed(2)}`);
-
-        // Cash just increased — check doubling ladder immediately
-        try {
-            const { runAutoClaimOnce } = await import('./autoClaim');
-            await runAutoClaimOnce();
-        } catch (error) {
-            Logger.warning(
-                `Post-resolve auto claim skipped: ${
-                    error instanceof Error ? error.message : String(error)
-                }`
-            );
-        }
+        // Auto-claim runs on its own daily schedule — do not check here.
     }
     Logger.separator();
 };

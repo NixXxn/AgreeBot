@@ -14,6 +14,7 @@ import {
   SettingsUpdate,
   HealthCheckResult,
   BalanceInfo,
+  AutoClaimStatus,
 } from '@/types/settings';
 
 export function SettingsView() {
@@ -26,6 +27,7 @@ export function SettingsView() {
   const [hasChanges, setHasChanges] = useState(false);
   const [healthCheck, setHealthCheck] = useState<HealthCheckResult | null>(null);
   const [balance, setBalance] = useState<BalanceInfo | null>(null);
+  const [autoClaim, setAutoClaim] = useState<AutoClaimStatus | null>(null);
 
   // Fetch settings
   const fetchSettings = useCallback(async () => {
@@ -83,11 +85,31 @@ export function SettingsView() {
     }
   }, []);
 
+  const fetchAutoClaim = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auto-claim', { cache: 'no-store' });
+      if (!response.ok) {
+        setAutoClaim(null);
+        return;
+      }
+      const data = (await response.json()) as AutoClaimStatus;
+      if (!Array.isArray(data?.history)) {
+        setAutoClaim(null);
+        return;
+      }
+      setAutoClaim(data);
+    } catch (err) {
+      console.error('Failed to fetch auto-claim history:', err);
+      setAutoClaim(null);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSettings();
     fetchHealth();
     fetchBalance();
-  }, [fetchSettings, fetchHealth, fetchBalance]);
+    fetchAutoClaim();
+  }, [fetchSettings, fetchHealth, fetchBalance, fetchAutoClaim]);
 
   // Save settings
   const saveSettings = async () => {
@@ -162,6 +184,7 @@ export function SettingsView() {
       setSettings(verified.settings);
       setTraderLabels(verified.traderLabels || {});
       setHasChanges(false);
+      void fetchAutoClaim();
       setSuccessMessage(
         data.message ||
           `Saved ${verified.settings.traders.length} trader(s) to MongoDB. Restart the bot container to reload them.`
@@ -295,6 +318,7 @@ export function SettingsView() {
             network={settings.network}
             wallet={settings.wallet}
             balance={balance}
+            autoClaim={autoClaim}
             onBotSettingsChange={(update) => updateSettings('botSettings', update)}
             onNetworkChange={(update) => updateSettings('network', update)}
           />

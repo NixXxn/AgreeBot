@@ -53,6 +53,8 @@ export interface BotSettings {
     consensusWindowSeconds: number;
     consensusApplyTo: 'BUY' | 'SELL' | 'BOTH';
     consensusSizeMode: 'AVERAGE' | 'LARGEST' | 'FIRST' | 'MEDIAN';
+    /** Live-only: withdraw winnings via doubling ladder at most once per day. */
+    autoClaimEnabled: boolean;
   };
 
   // Network Settings
@@ -88,6 +90,26 @@ export interface BalanceInfo {
   usdc: number;
   matic: number;
   proxyWallet: string;
+}
+
+export interface AutoClaimHistoryEntry {
+  at: string;
+  amountUsd: number;
+  recipient: string;
+  txHash?: string;
+  txId?: string;
+  baselineBefore: number;
+  baselineAfter: number;
+  cashBefore: number;
+}
+
+export interface AutoClaimStatus {
+  enabled: boolean;
+  baseline: number;
+  lastCheckAt: string | null;
+  lastPayoutUsd: number | null;
+  lastRecipient: string | null;
+  history: AutoClaimHistoryEntry[];
 }
 
 export type ActionType =
