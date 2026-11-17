@@ -5,7 +5,6 @@ import { MyTradesResponse } from '@/types/myTrades';
 import { CopyPnLBarChart } from '@/components/charts/CopyPnLBarChart';
 import { TradesCountChart } from '@/components/charts/TradesCountChart';
 import { CopyTimelineChart } from '@/components/charts/CopyTimelineChart';
-import { TradesPieChart } from '@/components/charts/TradesPieChart';
 import { MyTradesTable } from '@/components/MyTradesTable';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -353,15 +352,12 @@ export function MyTradesView() {
         </div>
       </Card>
 
-      {/* Charts Row 1 */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <CopyPnLBarChart byTrader={filteredData.byTrader} />
-        <TradesPieChart byTrader={filteredData.byTrader} />
-      </div>
-
-      {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <TradesCountChart byTrader={filteredData.byTrader} />
+      </div>
+      <div className="mb-8">
         <CopyTimelineChart trades={filteredData.allMyTrades} />
       </div>
 

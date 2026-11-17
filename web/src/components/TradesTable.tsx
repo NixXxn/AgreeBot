@@ -56,15 +56,6 @@ export function TradesTable() {
     return () => clearInterval(id);
   }, [fetchTrades]);
 
-  const formatAge = (seconds: number) => {
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    if (m < 60) return `${m}m ${s}s`;
-    const h = Math.floor(m / 60);
-    return `${h}h ${m % 60}m`;
-  };
-
   const filtered = trades.filter((t) => {
     if (filterMode === 'entered') return t.entered;
     if (filterMode === 'skipped') return !t.entered;
@@ -168,65 +159,14 @@ export function TradesTable() {
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {!loading && pending.length > 0 && (
-          <div>
-            <p className="text-sm font-medium mb-2">
-              Waiting for agreement ({pending.length})
-            </p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Market</TableHead>
-                  <TableHead>Side</TableHead>
-                  <TableHead className="text-right">Progress</TableHead>
-                  <TableHead>Traders</TableHead>
-                  <TableHead className="text-right">Age</TableHead>
-                  <TableHead className="text-right">Window</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pending.map((g) => (
-                  <TableRow key={g.id}>
-                    <TableCell className="max-w-[220px]">
-                      <div className="font-medium truncate" title={g.title || g.slug}>
-                        {g.title || g.slug || g.conditionId.slice(0, 12) || '—'}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {g.outcome || '—'}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={g.side === 'BUY' ? 'success' : 'warning'}>
-                        {g.side}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-amber-500">
-                      {g.traders}/{g.required}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {g.agreeingTraders.map(shortAddr).join(', ') || '—'}
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground">
-                      {formatAge(g.ageSeconds)}
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground">
-                      {formatAge(g.windowSeconds)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
         {loading ? (
           <p className="text-center text-muted-foreground py-8">Loading trades…</p>
-        ) : error && filtered.length === 0 && pending.length === 0 ? (
+        ) : error && filtered.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">
             {pending.length > 0
-              ? 'No finished bot trades yet — open consensus groups are listed above. Rows appear here when consensus fires or expires.'
+              ? `${pending.length} consensus group(s) still waiting — finished bot trades appear here when consensus fires or expires.`
               : 'No bot trades yet. Entries appear when consensus fires or expires (not on every monitored trader fill). Full stats live under My Trades.'}
           </p>
         ) : (

@@ -1,15 +1,5 @@
 'use client';
 
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
 import { TraderAnalysis } from '@/types/trader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TimeRange, filterByTimeRange } from '@/components/TimeRangeFilter';
@@ -20,91 +10,108 @@ interface PnLBarChartProps {
   timeRange?: TimeRange;
 }
 
-export function PnLBarChart({ traders, compact = false, timeRange = 'all' }: PnLBarChartProps) {
-  // Calculate P&L from daily realizedPnl filtered by time range
-  const data = traders
-    .map((t) => {
-      const filteredDaily = t.dailyBreakdown ? filterByTimeRange(t.dailyBreakdown, timeRange, 'date') : [];
-      const pnl = timeRange === 'all'
-        ? t.pnl.total
-        : filteredDaily.reduce((sum, d) => sum + (d.realizedPnl || 0), 0);
-      const volume = timeRange === 'all'
-        ? t.volume.totalBought
-        : filteredDaily.reduce((sum, d) => sum + d.totalBought, 0);
-      return {
-        name: t.label.length > 8 ? t.label.slice(0, 6) + '..' : t.label,
-        fullName: t.label,
-        pnl: Number(pnl.toFixed(2)),
-        volume,
-      };
-    })
-    .sort((a, b) => b.pnl - a.pnl);
+function traderRangePnl(t: TraderAnalysis, timeRange: TimeRange): number {
+  if (timeRange === 'all') return t.pnl.total;
+  const filteredDaily = t.dailyBreakdown
+    ? filterByTimeRange(t.dailyBreakdown, timeRange, 'date')
+    : [];
+  return filteredDaily.reduce((sum, d) => sum + (d.realizedPnl || 0), 0);
+}
 
-  const totalPnL = data.reduce((sum, d) => sum + d.pnl, 0);
+/** Portfolio-level P&L totals (sum across all bot-copy attributions). */
+export function PnLBarChart({
+  traders,
+  compact = false,
+  timeRange = 'all',
+}: PnLBarChartProps) {
+  const totalPnL = traders.reduce((sum, t) => sum + traderRangePnl(t, timeRange), 0);
+  const totalRealized = traders.reduce((sum, t) => {
+    if (timeRange === 'all') return sum + t.pnl.realized;
+    return sum + traderRangePnl(t, timeRange);
+  }, 0);
+  const totalUnrealized =
+    timeRange === 'all'
+      ? traders.reduce((sum, t) => sum + t.pnl.unrealized, 0)
+      : 0;
+  const grossProfit = traders.reduce((sum, t) => {
+    const p = traderRangePnl(t, timeRange);
+    return sum + (p > 0 ? p : 0);
+  }, 0);
+  const grossLoss = traders.reduce((sum, t) => {
+    const p = traderRangePnl(t, timeRange);
+    return sum + (p < 0 ? p : 0);
+  }, 0);
 
   return (
     <Card className={compact ? 'h-full' : ''}>
       <CardHeader className={compact ? 'pb-2 pt-3 px-4' : ''}>
-        <div className="flex items-center justify-between">
-          <CardTitle className={compact ? 'text-sm' : ''}>P&L</CardTitle>
-          <span
-            className={`font-mono font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'} ${compact ? 'text-lg' : 'text-xl'}`}
-          >
-            {totalPnL >= 0 ? '+' : ''}${totalPnL.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-          </span>
-        </div>
+        <CardTitle className={compact ? 'text-sm' : ''}>Total P&L</CardTitle>
       </CardHeader>
-      <CardContent className={compact ? 'pb-3 px-2' : ''}>
-        <ResponsiveContainer width="100%" height={compact ? 240 : 250}>
-          <BarChart
-            data={data}
-            margin={compact ? { top: 5, right: 5, left: 0, bottom: 40 } : { top: 10, right: 20, left: 10, bottom: 50 }}
+      <CardContent
+        className={`flex flex-col justify-center gap-4 ${compact ? 'pb-4 px-4' : ''}`}
+      >
+        <div>
+          <p
+            className={`font-mono font-bold ${
+              totalPnL >= 0 ? 'text-green-500' : 'text-red-500'
+            } ${compact ? 'text-4xl' : 'text-5xl'}`}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-            <XAxis
-              dataKey="name"
-              angle={-45}
-              textAnchor="end"
-              height={compact ? 50 : 80}
-              tick={{ fill: '#888', fontSize: compact ? 10 : 12 }}
-              axisLine={{ stroke: '#333' }}
-            />
-            <YAxis
-              tick={{ fill: '#888', fontSize: compact ? 10 : 12 }}
-              tickFormatter={(value) => `$${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
-              width={compact ? 40 : 60}
-              axisLine={{ stroke: '#333' }}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#1a1a1a',
-                border: '1px solid #333',
-                borderRadius: '8px',
-                color: '#fff',
-              }}
-              labelStyle={{ color: '#fff' }}
-              itemStyle={{ color: '#fff' }}
-              formatter={(value: number, name: string) => [
-                name === 'pnl' ? `$${value.toFixed(2)}` : `${value.toFixed(2)}%`,
-                name === 'pnl' ? 'P&L' : 'ROI',
-              ]}
-              labelFormatter={(label, payload) => {
-                if (payload && payload[0]) {
-                  return payload[0].payload.fullName;
-                }
-                return label;
-              }}
-            />
-            <Bar dataKey="pnl" name="P&L ($)" radius={[4, 4, 0, 0]}>
-              {data.map((entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={entry.pnl >= 0 ? '#22c55e' : '#ef4444'}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+            {totalPnL >= 0 ? '+' : '-'}$
+            {Math.abs(totalPnL).toLocaleString('en-US', {
+              maximumFractionDigits: 2,
+            })}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Overall bot-copy profit (all wallets summed)
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">Realized</p>
+            <p
+              className={`font-mono font-semibold ${
+                totalRealized >= 0 ? 'text-green-500' : 'text-red-500'
+              }`}
+            >
+              {totalRealized >= 0 ? '+' : '-'}$
+              {Math.abs(totalRealized).toFixed(2)}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">
+              {timeRange === 'all' ? 'Unrealized' : 'Gross profit'}
+            </p>
+            <p
+              className={`font-mono font-semibold ${
+                (timeRange === 'all' ? totalUnrealized : grossProfit) >= 0
+                  ? 'text-green-500'
+                  : 'text-red-500'
+              }`}
+            >
+              {timeRange === 'all' ? (
+                <>
+                  {totalUnrealized >= 0 ? '+' : '-'}$
+                  {Math.abs(totalUnrealized).toFixed(2)}
+                </>
+              ) : (
+                <>+${grossProfit.toFixed(2)}</>
+              )}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">Gross profit</p>
+            <p className="font-mono font-semibold text-green-500">
+              +${grossProfit.toFixed(2)}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">Gross loss</p>
+            <p className="font-mono font-semibold text-red-500">
+              -${Math.abs(grossLoss).toFixed(2)}
+            </p>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

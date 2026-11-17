@@ -10,33 +10,37 @@ interface ProfitLossDonutProps {
 }
 
 export function ProfitLossDonut({ traders, timeRange = 'all' }: ProfitLossDonutProps) {
-  // Calculate P&L for each trader based on time range
-  const traderPnLs = traders.map((t) => {
-    if (timeRange === 'all') return t.pnl.total;
-    const filteredDaily = t.dailyBreakdown ? filterByTimeRange(t.dailyBreakdown, timeRange, 'date') : [];
-    return filteredDaily.reduce((sum, d) => sum + (d.realizedPnl || 0), 0);
-  });
+  // Sum dollar profits vs losses across all attributions (not trader headcount)
+  let grossProfit = 0;
+  let grossLoss = 0;
 
-  const profitable = traderPnLs.filter((pnl) => pnl > 0).length;
-  const losing = traderPnLs.filter((pnl) => pnl < 0).length;
-  const breakeven = traders.length - profitable - losing;
+  for (const t of traders) {
+    const pnl =
+      timeRange === 'all'
+        ? t.pnl.total
+        : (t.dailyBreakdown
+            ? filterByTimeRange(t.dailyBreakdown, timeRange, 'date')
+            : []
+          ).reduce((sum, d) => sum + (d.realizedPnl || 0), 0);
+    if (pnl > 0) grossProfit += pnl;
+    else if (pnl < 0) grossLoss += Math.abs(pnl);
+  }
 
   const data = [
-    { name: 'Profitable', value: profitable, color: '#22c55e' },
-    { name: 'Losing', value: losing, color: '#ef4444' },
-    ...(breakeven > 0 ? [{ name: 'Breakeven', value: breakeven, color: '#71717a' }] : []),
+    { name: 'Profit', value: grossProfit, color: '#22c55e' },
+    { name: 'Loss', value: grossLoss, color: '#ef4444' },
   ].filter((d) => d.value > 0);
 
-  const total = traders.length;
+  const net = grossProfit - grossLoss;
 
   return (
     <div className="bg-card rounded-xl border p-3 flex flex-col items-center justify-center h-full">
-      <span className="text-xs text-muted-foreground mb-1">Traders P/L</span>
+      <span className="text-xs text-muted-foreground mb-1">Total P/L mix</span>
       <div className="relative" style={{ width: 100, height: 80 }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={data}
+              data={data.length > 0 ? data : [{ name: 'None', value: 1, color: '#71717a' }]}
               cx="50%"
               cy="50%"
               innerRadius={25}
@@ -46,27 +50,32 @@ export function ProfitLossDonut({ traders, timeRange = 'all' }: ProfitLossDonutP
               startAngle={180}
               endAngle={-180}
             >
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-              ))}
+              {(data.length > 0 ? data : [{ name: 'None', value: 1, color: '#71717a' }]).map(
+                (entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                )
+              )}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
-        {/* Center text */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <span className="text-lg font-bold font-mono text-green-500">{profitable}</span>
-            <span className="text-muted-foreground text-xs">/</span>
-            <span className="text-lg font-bold font-mono text-red-500">{losing}</span>
-          </div>
+          <span
+            className={`text-sm font-bold font-mono ${
+              net >= 0 ? 'text-green-500' : 'text-red-500'
+            }`}
+          >
+            {net >= 0 ? '+' : '-'}${Math.abs(net).toFixed(0)}
+          </span>
         </div>
       </div>
       <div className="flex gap-2 text-[10px] text-muted-foreground mt-1">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>Win
+          <span className="w-2 h-2 rounded-full bg-green-500"></span>$
+          {grossProfit.toFixed(0)}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-red-500"></span>Loss
+          <span className="w-2 h-2 rounded-full bg-red-500"></span>$
+          {grossLoss.toFixed(0)}
         </span>
       </div>
     </div>

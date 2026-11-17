@@ -17,59 +17,59 @@ interface CopyTimelineChartProps {
   trades: CopyTrade[];
 }
 
+/**
+ * Cumulative bot P&L from mark-to-market / resolved `trade.pnl` values.
+ * Does NOT use sold−bought cashflow (that treats every BUY as a loss).
+ */
 export function CopyTimelineChart({ trades }: CopyTimelineChartProps) {
-  // Group trades by day and calculate cumulative P&L
-  const sortedTrades = [...trades].sort((a, b) => a.timestamp - b.timestamp);
+  const withPnl = trades.filter(
+    (t) => t.pnl != null && Number.isFinite(t.pnl)
+  );
 
-  const dailyData = new Map<string, { bought: number; sold: number }>();
-
-  for (const trade of sortedTrades) {
-    const date = new Date(trade.timestamp * 1000).toISOString().split('T')[0];
-
-    if (!dailyData.has(date)) {
-      dailyData.set(date, { bought: 0, sold: 0 });
-    }
-
-    const day = dailyData.get(date)!;
-    if (trade.side === 'BUY') {
-      day.bought += trade.usdcSize;
-    } else {
-      day.sold += trade.usdcSize;
-    }
-  }
-
-  // Build cumulative data
-  let cumPnL = 0;
-  const data = Array.from(dailyData.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, { bought, sold }]) => {
-      const dailyPnL = sold - bought;
-      cumPnL += dailyPnL;
-      return {
-        date: date.slice(5), // MM-DD format
-        fullDate: date,
-        dailyPnL: Number(dailyPnL.toFixed(2)),
-        cumPnL: Number(cumPnL.toFixed(2)),
-      };
-    });
-
-  if (data.length === 0) {
+  if (withPnl.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Cumulative P&L Over Time</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground">No trade data available</p>
+          <p className="text-muted-foreground text-sm">
+            No marked P&L yet — this chart uses each trade&apos;s realized /
+            unrealized P&L, not buy/sell cashflow.
+          </p>
         </CardContent>
       </Card>
     );
   }
 
+  const sorted = [...withPnl].sort((a, b) => a.timestamp - b.timestamp);
+  const dailyPnl = new Map<string, number>();
+
+  for (const trade of sorted) {
+    const date = new Date(trade.timestamp * 1000).toISOString().split('T')[0];
+    dailyPnl.set(date, (dailyPnl.get(date) || 0) + Number(trade.pnl));
+  }
+
+  let cumPnL = 0;
+  const data = Array.from(dailyPnl.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, dayPnl]) => {
+      cumPnL += dayPnl;
+      return {
+        date: date.slice(5),
+        fullDate: date,
+        dailyPnL: Number(dayPnl.toFixed(2)),
+        cumPnL: Number(cumPnL.toFixed(2)),
+      };
+    });
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Cumulative P&L Over Time</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Running total of bot trade P&L (marked / resolved), not cash in/out
+        </p>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={400}>
@@ -89,7 +89,10 @@ export function CopyTimelineChart({ trades }: CopyTimelineChartProps) {
               }}
               labelStyle={{ color: '#fff' }}
               itemStyle={{ color: '#fff' }}
-              formatter={(value: number) => [`$${value.toFixed(2)}`, '']}
+              formatter={(value: number, name: string) => [
+                `$${value.toFixed(2)}`,
+                name,
+              ]}
               labelFormatter={(label, payload) => {
                 if (payload && payload[0]) {
                   return payload[0].payload.fullDate;
