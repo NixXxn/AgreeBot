@@ -329,6 +329,28 @@ export const evaluateConsensusBuffer = async (): Promise<{
                     .map((a) => `${a.slice(0, 6)}…${a.slice(-4)}`)
                     .join(', ')} | sized $${readyTrade.trade.usdcSize.toFixed(2)} (${ENV.CONSENSUS_SIZE_MODE})`
             );
+
+            // Drop opposite-outcome groups on the same market so we don't enter both sides
+            if (ENV.BLOCK_OPPOSITE_SIDE !== false) {
+                for (const [otherKey, other] of [...consensusBuffer.entries()]) {
+                    if (
+                        other.conditionId === group.conditionId &&
+                        other.asset !== group.asset &&
+                        other.side === group.side
+                    ) {
+                        Logger.warning(
+                            `Clearing opposite consensus ${other.side} ${other.outcome || other.asset.slice(0, 10)}… ` +
+                                `(already entering ${group.outcome || group.asset.slice(0, 10)})`
+                        );
+                        await markTradesProcessed(other.trades, {
+                            bot: true,
+                            botExcutedTime: 999,
+                        });
+                        consensusBuffer.delete(otherKey);
+                        await clearPendingGroup(otherKey);
+                    }
+                }
+            }
             continue;
         }
 

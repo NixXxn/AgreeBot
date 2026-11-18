@@ -330,6 +330,18 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
             overrides.SKIP_PRICE_SLIPPAGE.toLowerCase()
         );
     }
+    if (overrides.BLOCK_OPPOSITE_SIDE !== undefined) {
+        ENV.BLOCK_OPPOSITE_SIDE = overrides.BLOCK_OPPOSITE_SIDE !== 'false';
+    }
+    if (overrides.BLOCK_AVERAGE_DOWN !== undefined) {
+        ENV.BLOCK_AVERAGE_DOWN = overrides.BLOCK_AVERAGE_DOWN !== 'false';
+    }
+    if (overrides.BLOCK_EVENT_FAMILY !== undefined) {
+        ENV.BLOCK_EVENT_FAMILY = overrides.BLOCK_EVENT_FAMILY !== 'false';
+    }
+    if (overrides.SKIP_CRYPTO_UPDOWN !== undefined) {
+        ENV.SKIP_CRYPTO_UPDOWN = overrides.SKIP_CRYPTO_UPDOWN !== 'false';
+    }
     if (overrides.HEDGE_ARB_ENABLED !== undefined) {
         ENV.HEDGE_ARB_ENABLED = overrides.HEDGE_ARB_ENABLED !== 'false';
     }

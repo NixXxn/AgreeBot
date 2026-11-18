@@ -9,6 +9,8 @@ interface PaperPosition {
     avgPrice: number;
     title?: string;
     outcome?: string;
+    slug?: string;
+    eventSlug?: string;
 }
 
 /** In-memory paper book keyed by asset (token id). */
@@ -46,6 +48,8 @@ export const loadPaperPositionsFromDb = async (): Promise<void> => {
                         avgPrice: price,
                         title: s.title,
                         outcome: s.outcome,
+                        slug: (s as { slug?: string }).slug,
+                        eventSlug: (s as { eventSlug?: string }).eventSlug,
                     });
                 } else {
                     const newTokens = existing.tokens + tokens;
@@ -101,6 +105,9 @@ export const getOppositePaperPosition = (
     return undefined;
 };
 
+export const getAllPaperPositions = (): PaperPosition[] =>
+    Array.from(book.values()).filter((p) => p.tokens > 1e-8);
+
 /** Wipe in-memory paper book (e.g. after dashboard Reset Paper Stats). */
 export const clearPaperBook = (): number => {
     const n = book.size;
@@ -120,7 +127,7 @@ export const applyPaperFill = (
     conditionId: string,
     sizeUsd: number,
     price: number,
-    meta?: { title?: string; outcome?: string }
+    meta?: { title?: string; outcome?: string; slug?: string; eventSlug?: string }
 ): { sizeUsd: number; tokens: number } => {
     if (!asset || sizeUsd <= 0 || price <= 0) {
         return { sizeUsd: 0, tokens: 0 };
@@ -139,6 +146,8 @@ export const applyPaperFill = (
                 avgPrice: price,
                 title: meta?.title,
                 outcome: meta?.outcome,
+                slug: meta?.slug,
+                eventSlug: meta?.eventSlug,
             });
         } else {
             const newTokens = existing.tokens + tokens;
@@ -146,6 +155,8 @@ export const applyPaperFill = (
             existing.tokens = newTokens;
             existing.sizeUsd = newSize;
             existing.avgPrice = newTokens > 0 ? newSize / newTokens : price;
+            if (meta?.eventSlug) existing.eventSlug = meta.eventSlug;
+            if (meta?.slug) existing.slug = meta.slug;
         }
         return { sizeUsd, tokens };
     }

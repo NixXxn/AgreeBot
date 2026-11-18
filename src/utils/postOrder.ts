@@ -6,6 +6,7 @@ import Logger from './logger';
 import { calculateOrderSize, getTradeMultiplier } from '../config/copyStrategy';
 import {
     applyPaperFill,
+    getAllPaperPositions,
     getOppositePaperPosition,
     getPaperPosition,
     hasOpenPaperPosition,
@@ -15,6 +16,12 @@ import {
     findOppositePosition,
     floorToTick,
 } from './hedgeArb';
+import {
+    findEventFamilyPosition,
+    findSameAssetPosition,
+    isAverageDown,
+    isCryptoUpDownMarket,
+} from './entryGuards';
 
 const RETRY_LIMIT = ENV.RETRY_LIMIT;
 const COPY_STRATEGY_CONFIG = ENV.COPY_STRATEGY_CONFIG;
@@ -120,12 +127,47 @@ const postOrder = async (
             ? Number(slippageRefPrice)
             : Number(trade.price) || 0;
 
+    const positionList = (): Array<{
+        asset: string;
+        conditionId: string;
+        size?: number;
+        avgPrice?: number;
+        currentValue?: number;
+        outcome?: string;
+        slug?: string;
+        eventSlug?: string;
+        sizeUsd?: number;
+        tokens?: number;
+    }> => {
+        if (ENV.PAPER_MODE) {
+            return getAllPaperPositions().map((p) => ({
+                asset: p.asset,
+                conditionId: p.conditionId,
+                size: p.tokens,
+                avgPrice: p.avgPrice,
+                outcome: p.outcome,
+                slug: p.slug,
+                eventSlug: p.eventSlug,
+                sizeUsd: p.sizeUsd,
+            }));
+        }
+        return (myPositions || (my_position ? [my_position] : [])).map((p) => ({
+            asset: p.asset,
+            conditionId: p.conditionId,
+            size: p.size,
+            avgPrice: p.avgPrice,
+            currentValue: p.currentValue,
+            outcome: p.outcome,
+            slug: p.slug,
+            eventSlug: p.eventSlug,
+        }));
+    };
+
     const resolveOppositeHeld = (): {
         avgPrice: number;
         outcome?: string;
         sizeUsd: number;
     } | null => {
-        if (!ENV.HEDGE_ARB_ENABLED) return null;
         if (ENV.PAPER_MODE) {
             const opp = getOppositePaperPosition(trade.conditionId, trade.asset);
             if (!opp) return null;
@@ -143,6 +185,81 @@ const postOrder = async (
             outcome: opp.outcome,
             sizeUsd,
         };
+    };
+
+    /** Shared BUY skips: crypto up/down, opposite side, average-down, event family. */
+    const evaluateBuyEntryGuards = (
+        askPrice: number
+    ): { skip: boolean; reason?: string } => {
+        if (
+            ENV.SKIP_CRYPTO_UPDOWN &&
+            isCryptoUpDownMarket({
+                slug: trade.slug,
+                eventSlug: trade.eventSlug,
+                title: trade.title,
+            })
+        ) {
+            return {
+                skip: true,
+                reason: 'crypto Up/Down market blocked (SKIP_CRYPTO_UPDOWN)',
+            };
+        }
+
+        const positions = positionList();
+        const oppositeHeld = resolveOppositeHeld();
+        if (oppositeHeld) {
+            if (ENV.BLOCK_OPPOSITE_SIDE) {
+                return {
+                    skip: true,
+                    reason:
+                        `already hold opposite ${oppositeHeld.outcome || 'outcome'} ` +
+                        `@$${oppositeHeld.avgPrice.toFixed(3)} — BLOCK_OPPOSITE_SIDE`,
+                };
+            }
+            if (ENV.HEDGE_ARB_ENABLED) {
+                const plan = computeHedgeArbPlan(
+                    oppositeHeld.avgPrice,
+                    askPrice,
+                    ENV.HEDGE_ARB_MAX_SUM,
+                    ENV.HEDGE_ARB_MAX_LEG
+                );
+                if (plan.skip || !plan.allowMarket) {
+                    return {
+                        skip: true,
+                        reason: `hedge guard: ${plan.reason}`,
+                    };
+                }
+            }
+        }
+
+        if (ENV.BLOCK_AVERAGE_DOWN) {
+            const same = findSameAssetPosition(positions, trade.asset);
+            const heldAvg = same?.avgPrice || 0;
+            if (heldAvg > 0 && isAverageDown(heldAvg, askPrice)) {
+                return {
+                    skip: true,
+                    reason:
+                        `average-down blocked (held @$${heldAvg.toFixed(3)}, ask @$${askPrice.toFixed(
+                            3
+                        )})`,
+                };
+            }
+        }
+
+        if (ENV.BLOCK_EVENT_FAMILY) {
+            const family = findEventFamilyPosition(positions, trade);
+            if (family) {
+                return {
+                    skip: true,
+                    reason:
+                        `event-family blocked — already in ` +
+                        `${family.outcome || family.slug || family.eventSlug || 'related market'} ` +
+                        `(BLOCK_EVENT_FAMILY)`,
+                };
+            }
+        }
+
+        return { skip: false };
     };
 
     // Paper / preview mode: log the signal and mark processed — never place orders
@@ -164,28 +281,11 @@ const postOrder = async (
         }
 
         if (side === 'BUY') {
-            const held = resolveOppositeHeld();
-            if (held) {
-                const plan = computeHedgeArbPlan(
-                    held.avgPrice,
-                    trade.price,
-                    ENV.HEDGE_ARB_MAX_SUM,
-                    ENV.HEDGE_ARB_MAX_LEG
-                );
-                Logger.info(
-                    `[PAPER] Hedge guard vs ${held.outcome || 'other side'} @$${held.avgPrice.toFixed(
-                        3
-                    )}: ${plan.reason}`
-                );
-                if (plan.skip || !plan.allowMarket) {
-                    Logger.warning(
-                        `[PAPER] Skip opposite-side BUY — would need limit ≤ $${plan.maxLimitPrice.toFixed(
-                            3
-                        )} (ask/ref $${Number(trade.price).toFixed(3)})`
-                    );
-                    await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
-                    return { executed: false, sizeUsd: 0, paper: true };
-                }
+            const guard = evaluateBuyEntryGuards(Number(trade.price) || 0);
+            if (guard.skip) {
+                Logger.warning(`[PAPER] Skip BUY — ${guard.reason}`);
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
+                return { executed: false, sizeUsd: 0, paper: true };
             }
         }
 
@@ -219,7 +319,12 @@ const postOrder = async (
             trade.conditionId,
             sizeUsd,
             trade.price,
-            { title: trade.title, outcome: trade.outcome }
+            {
+                title: trade.title,
+                outcome: trade.outcome,
+                slug: trade.slug,
+                eventSlug: trade.eventSlug,
+            }
         );
 
         Logger.warning(
@@ -389,23 +494,31 @@ const postOrder = async (
             return liveSkip();
         }
 
-        // Opposite-outcome hedge: only market-buy if both legs stay under arb caps;
-        // otherwise rest a GTC limit at the residual price (or skip).
-        const oppositeHeld = resolveOppositeHeld();
-        if (oppositeHeld) {
-            let peekAsk = Number(trade.price) || 0;
-            try {
-                const book = await clobClient.getOrderBook(trade.asset);
-                if (book.asks?.length) {
-                    const bestAsk = book.asks.reduce((min, ask) => {
-                        return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
-                    }, book.asks[0]);
-                    peekAsk = parseFloat(bestAsk.price);
-                }
-            } catch {
-                /* use trade.price */
+        // Peek ask for entry guards (opposite / avg-down / event family / crypto)
+        let peekAsk = Number(trade.price) || 0;
+        try {
+            const book = await clobClient.getOrderBook(trade.asset);
+            if (book.asks?.length) {
+                const bestAsk = book.asks.reduce((min, ask) => {
+                    return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
+                }, book.asks[0]);
+                peekAsk = parseFloat(bestAsk.price);
             }
+        } catch {
+            /* use trade.price */
+        }
 
+        const entryGuard = evaluateBuyEntryGuards(peekAsk);
+        if (entryGuard.skip) {
+            Logger.warning(`Skip BUY — ${entryGuard.reason}`);
+            await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+            return liveSkip();
+        }
+
+        // Legacy hedge GTC path only when opposite is allowed and arb mode is on
+        const oppositeHeld =
+            !ENV.BLOCK_OPPOSITE_SIDE && ENV.HEDGE_ARB_ENABLED ? resolveOppositeHeld() : null;
+        if (oppositeHeld) {
             const plan = computeHedgeArbPlan(
                 oppositeHeld.avgPrice,
                 peekAsk,

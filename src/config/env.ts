@@ -478,7 +478,7 @@ export const ENV = {
     ).trim(),
     // Consensus / multi-trader agreement settings
     CONSENSUS_ENABLED: process.env.CONSENSUS_ENABLED === 'true',
-    CONSENSUS_MIN_AGREEMENT: parseInt(process.env.CONSENSUS_MIN_AGREEMENT || '2', 10),
+    CONSENSUS_MIN_AGREEMENT: parseInt(process.env.CONSENSUS_MIN_AGREEMENT || '6', 10),
     CONSENSUS_WINDOW_SECONDS: parseInt(process.env.CONSENSUS_WINDOW_SECONDS || '300', 10),
     CONSENSUS_APPLY_TO: (process.env.CONSENSUS_APPLY_TO || 'BUY').toUpperCase() as
         | 'BUY'
@@ -500,9 +500,25 @@ export const ENV = {
         (process.env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
     ),
     /**
-     * When we already hold the opposite outcome of a market, only buy the
-     * second side if both legs stay under HEDGE_ARB_MAX_LEG and their sum
-     * ≤ HEDGE_ARB_MAX_SUM (else place a GTC limit at the residual price).
+     * When true (default): never buy the opposite outcome of a market we already hold.
+     * When false: fall back to HEDGE_ARB_* market/limit behavior.
+     */
+    BLOCK_OPPOSITE_SIDE: process.env.BLOCK_OPPOSITE_SIDE !== 'false',
+    /**
+     * When true (default): skip additional BUYs on an outcome we already hold
+     * if the ask is below our average entry (no averaging down).
+     */
+    BLOCK_AVERAGE_DOWN: process.env.BLOCK_AVERAGE_DOWN !== 'false',
+    /**
+     * When true (default): only one instrument per eventSlug / match family
+     * (e.g. series OR game1 — not both).
+     */
+    BLOCK_EVENT_FAMILY: process.env.BLOCK_EVENT_FAMILY !== 'false',
+    /** When true (default): skip Bitcoin/ETH/SOL "Up or Down" short-interval markets. */
+    SKIP_CRYPTO_UPDOWN: process.env.SKIP_CRYPTO_UPDOWN !== 'false',
+    /**
+     * Legacy: when BLOCK_OPPOSITE_SIDE=false, only market-buy the second side if
+     * both legs stay under HEDGE_ARB_MAX_LEG and sum ≤ HEDGE_ARB_MAX_SUM.
      */
     HEDGE_ARB_ENABLED: process.env.HEDGE_ARB_ENABLED !== 'false',
     HEDGE_ARB_MAX_SUM: parseFloat(process.env.HEDGE_ARB_MAX_SUM || '0.90'),
