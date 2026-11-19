@@ -289,8 +289,13 @@ const postOrder = async (
             }
         }
 
-        // Virtual balance for sizing (PAPER_BALANCE_USD, or real wallet balance if set)
-        const paperBalance = my_balance > 0 ? my_balance : ENV.PAPER_BALANCE_USD;
+        // Paper bankroll for sizing — always PAPER_BALANCE_USD (ignore live dust like $0.02)
+        const paperBalance =
+            Number.isFinite(ENV.PAPER_BALANCE_USD) && ENV.PAPER_BALANCE_USD > 0
+                ? ENV.PAPER_BALANCE_USD
+                : my_balance > 0
+                  ? my_balance
+                  : 10000;
         const paperPos = getPaperPosition(trade.asset);
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,

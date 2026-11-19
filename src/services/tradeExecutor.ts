@@ -187,13 +187,17 @@ const doTrading = async (clobClient: ClobClient | null, trades: TradeWithUser[])
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
+        // Paper mode sizes against PAPER_BALANCE_USD, not live CLOB dust
+        if (ENV.PAPER_MODE && ENV.PAPER_BALANCE_USD > 0) {
+            my_balance = ENV.PAPER_BALANCE_USD;
+        }
 
         // Calculate trader's total portfolio value from positions
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        if (PROXY_WALLET) {
+        if (PROXY_WALLET || ENV.PAPER_MODE) {
             Logger.balance(my_balance, user_balance, trade.userAddress);
         }
 
@@ -291,12 +295,15 @@ const doConsensusTrading = async (
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
+        if (ENV.PAPER_MODE && ENV.PAPER_BALANCE_USD > 0) {
+            my_balance = ENV.PAPER_BALANCE_USD;
+        }
 
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        if (PROXY_WALLET) {
+        if (PROXY_WALLET || ENV.PAPER_MODE) {
             Logger.balance(my_balance, user_balance, ready.referenceTrader);
         }
 
@@ -380,13 +387,16 @@ const doAggregatedTrading = async (
             );
             my_balance = await getMyBalance(PROXY_WALLET);
         }
+        if (ENV.PAPER_MODE && ENV.PAPER_BALANCE_USD > 0) {
+            my_balance = ENV.PAPER_BALANCE_USD;
+        }
 
         // Calculate trader's total portfolio value from positions
         const user_balance = user_positions.reduce((total, pos) => {
             return total + (pos.currentValue || 0);
         }, 0);
 
-        if (PROXY_WALLET) {
+        if (PROXY_WALLET || ENV.PAPER_MODE) {
             Logger.balance(my_balance, user_balance, agg.userAddress);
         }
 
