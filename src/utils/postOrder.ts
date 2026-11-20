@@ -129,20 +129,6 @@ const bestBidAsk = (orderBook: {
     return { bestBid, bestAsk, bidSize, askSize };
 };
 
-/** Join the bid side without crossing the ask (post-only safe). */
-const makerBuyLimit = (bestBid: number, bestAsk: number, tick: number): number => {
-    let price = 0;
-    if (bestBid > 0) {
-        price = floorToTick(bestBid, tick);
-        if (bestAsk > 0 && price >= bestAsk - 1e-12) {
-            price = floorToTick(bestAsk - tick, tick);
-        }
-    } else if (bestAsk > 0) {
-        price = floorToTick(bestAsk - tick, tick);
-    }
-    return clampClobPrice(price);
-};
-
 /** Join the ask side without crossing the bid (post-only safe). */
 const makerSellLimit = (bestBid: number, bestAsk: number, tick: number): number => {
     let price = 0;
@@ -165,13 +151,6 @@ export interface PostOrderResult {
 
 const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
 
-/** Max ± fraction from reference price (default 15%). */
-const slippageFraction = (): number => {
-    const pct = Number(ENV.MAX_SLIPPAGE_PERCENT);
-    if (!Number.isFinite(pct) || pct <= 0) return 0.15;
-    return pct / 100;
-};
-
 const postOrder = async (
     clobClient: ClobClient | null,
     condition: string,
@@ -181,7 +160,7 @@ const postOrder = async (
     my_balance: number,
     user_balance: number,
     userAddress: string,
-    /** Price for slippage band — last agreeing trader's fill for consensus */
+    /** Last agreeing trader's fill — used as the maker BUY limit price */
     slippageRefPrice?: number,
     /** All of our open positions (used to detect opposite-outcome hedge) */
     myPositions?: UserPositionInterface[]
@@ -540,21 +519,11 @@ const postOrder = async (
             return liveSkip();
         }
 
-        // Peek ask for entry guards (opposite / avg-down / event family / crypto)
-        let peekAsk = Number(trade.price) || 0;
-        try {
-            const book = await clobClient.getOrderBook(trade.asset);
-            if (book.asks?.length) {
-                const bestAsk = book.asks.reduce((min, ask) => {
-                    return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
-                }, book.asks[0]);
-                peekAsk = parseFloat(bestAsk.price);
-            }
-        } catch {
-            /* use trade.price */
-        }
+        // Maker limit = last agreeing / consensus entry (not the live ask)
+        const consensusPrice =
+            refPrice > 0 ? refPrice : Number(trade.price) > 0 ? Number(trade.price) : 0;
 
-        const entryGuard = evaluateBuyEntryGuards(peekAsk);
+        const entryGuard = evaluateBuyEntryGuards(consensusPrice);
         if (entryGuard.skip) {
             Logger.warning(`Skip BUY — ${entryGuard.reason}`);
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
@@ -567,7 +536,7 @@ const postOrder = async (
         if (oppositeHeld) {
             const plan = computeHedgeArbPlan(
                 oppositeHeld.avgPrice,
-                peekAsk,
+                consensusPrice,
                 ENV.HEDGE_ARB_MAX_SUM,
                 ENV.HEDGE_ARB_MAX_LEG
             );
@@ -662,62 +631,49 @@ const postOrder = async (
             }
         }
 
-        // Maker BUY: rest a post-only GTC bid (do not cross the ask)
-        const orderBook = await clobClient.getOrderBook(trade.asset);
-        const { bestBid, bestAsk } = bestBidAsk(orderBook);
-        if (!(bestAsk > 0) && !(bestBid > 0)) {
-            Logger.warning('Empty order book — skip maker BUY');
+        // Maker BUY: GTC post-only at last-agreeing consensus price (no book-slippage gate)
+        if (!(consensusPrice > 0)) {
+            Logger.warning('No consensus entry price — skip maker BUY');
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
             return liveSkip();
         }
 
-        const marketPrice = bestAsk > 0 ? bestAsk : Number(trade.price) || bestBid;
-        if (ENV.SKIP_PRICE_SLIPPAGE) {
-            Logger.info(
-                `Book bid $${bestBid.toFixed(4)} / ask $${bestAsk.toFixed(4)} | ` +
-                    `ref buy $${refPrice.toFixed(4)} | slippage check skipped`
-            );
-        } else {
-            const slip = slippageFraction();
-            const minP = refPrice * (1 - slip);
-            const maxP = refPrice * (1 + slip);
-            Logger.info(
-                `Book bid $${bestBid.toFixed(4)} / ask $${bestAsk.toFixed(4)} | ` +
-                    `ref buy $${refPrice.toFixed(4)} | ` +
-                    `allowed ±${(slip * 100).toFixed(0)}% [$${minP.toFixed(4)} … $${maxP.toFixed(4)}]`
-            );
-            if (!(marketPrice >= minP && marketPrice <= maxP)) {
-                Logger.warning(
-                    `Price slippage too high - skipping trade ` +
-                        `(ask $${marketPrice.toFixed(4)} outside ±${(slip * 100).toFixed(0)}% of ` +
-                        `ref buy $${refPrice.toFixed(4)})`
-                );
-                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-                return liveSkip();
-            }
-        }
-
         const maxEntry = Number(ENV.MAX_ENTRY_PRICE);
-        if (Number.isFinite(maxEntry) && maxEntry > 0 && marketPrice > maxEntry + 1e-9) {
+        if (Number.isFinite(maxEntry) && maxEntry > 0 && consensusPrice > maxEntry + 1e-9) {
             Logger.warning(
-                `Skip BUY — ask $${marketPrice.toFixed(3)} > MAX_ENTRY_PRICE $${maxEntry.toFixed(2)}`
+                `Skip BUY — consensus $${consensusPrice.toFixed(3)} > MAX_ENTRY_PRICE $${maxEntry.toFixed(2)}`
             );
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
             return liveSkip();
         }
 
         const tick = await resolveTickSize(clobClient, trade.asset);
-        let buyPrice = makerBuyLimit(bestBid, bestAsk, tick);
+        let buyPrice = floorToTick(consensusPrice, tick);
         if (Number.isFinite(maxEntry) && maxEntry > 0) {
             buyPrice = Math.min(buyPrice, floorToTick(maxEntry, tick));
         }
         buyPrice = clampClobPrice(buyPrice);
-        if (!(buyPrice > 0) || (bestAsk > 0 && buyPrice >= bestAsk - 1e-12)) {
+        if (!(buyPrice > 0)) {
             Logger.warning(
-                `No post-only BUY price (bid $${bestBid.toFixed(4)}, ask $${bestAsk.toFixed(4)}) — skip`
+                `Invalid maker BUY price from consensus $${consensusPrice.toFixed(4)} — skip`
             );
             await UserActivity.updateOne({ _id: trade._id }, { bot: true });
             return liveSkip();
+        }
+
+        let bestAsk = 0;
+        let bestBid = 0;
+        try {
+            const orderBook = await clobClient.getOrderBook(trade.asset);
+            ({ bestBid, bestAsk } = bestBidAsk(orderBook));
+        } catch {
+            /* book is informational only */
+        }
+        if (bestAsk > 0 && buyPrice >= bestAsk - 1e-12) {
+            Logger.info(
+                `Consensus bid $${buyPrice.toFixed(4)} ≥ ask $${bestAsk.toFixed(4)} — ` +
+                    `post-only may reject if this crosses; still posting at last-agree price`
+            );
         }
 
         const budgetUsd = orderCalc.finalAmount;
@@ -732,8 +688,9 @@ const postOrder = async (
         }
 
         Logger.info(
-            `📌 Maker BUY: ${sizeTokens} @ $${buyPrice.toFixed(4)} ` +
-                `(~$${notional.toFixed(2)}; Balance: $${my_balance.toFixed(2)})`
+            `📌 Maker BUY at consensus: ${sizeTokens} @ $${buyPrice.toFixed(4)} ` +
+                `(last agree $${consensusPrice.toFixed(4)}; ~$${notional.toFixed(2)}; ` +
+                `book ${bestBid.toFixed(4)}/${bestAsk.toFixed(4)}; Balance: $${my_balance.toFixed(2)})`
         );
         try {
             const resp = await clobClient.createAndPostOrder(

@@ -263,10 +263,7 @@ const doConsensusTrading = async (
         Logger.info(
             `Last agreeing buy: $${ready.lastAgreeingPrice.toFixed(4)} ` +
                 `(${ready.lastAgreeingTrader.slice(0, 6)}…${ready.lastAgreeingTrader.slice(-4)}) | ` +
-                `VWAP $${Number(ready.trade.price).toFixed(4)} | ` +
-                (ENV.SKIP_PRICE_SLIPPAGE
-                    ? 'slippage check off'
-                    : `slippage ±${ENV.MAX_SLIPPAGE_PERCENT}%`)
+                `VWAP $${Number(ready.trade.price).toFixed(4)} | maker limit @ last agree`
         );
 
         // Mark all contributing trades as being processed
