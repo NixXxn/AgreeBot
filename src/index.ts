@@ -76,6 +76,11 @@ export const main = async () => {
 
         Logger.startup(ENV.USER_ADDRESSES, PROXY_WALLET);
 
+        if (ENV.GRAVIA_FEED_ENABLED) {
+            const { syncGraviaSubscription } = await import('./services/graviaSync');
+            await syncGraviaSubscription(ENV.USER_ADDRESSES);
+        }
+
         if (ENV.PAPER_MODE) {
             Logger.warning(
                 'PAPER MODE enabled — monitoring traders and logging signals only (no live orders)'

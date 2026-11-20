@@ -508,4 +508,25 @@ export const ENV = {
     HEDGE_ARB_MAX_LEG: parseFloat(process.env.HEDGE_ARB_MAX_LEG || '0.90'),
     // Health HTTP server (Coolify / Docker healthchecks)
     HEALTH_PORT: parseInt(process.env.HEALTH_PORT || process.env.PORT || '3000', 10),
+    /** Push trade fills via Gravia webhooks into Mongo (dashboard traders). */
+    GRAVIA_FEED_ENABLED: ['true', '1', 'yes', 'on'].includes(
+        (process.env.GRAVIA_FEED_ENABLED || 'true').toLowerCase()
+    ),
+    GRAVIA_API: (process.env.GRAVIA_API || process.env.GRAVIA_API_KEY || '').trim(),
+    GRAVIA_SIGNING_SECRET: (process.env.GRAVIA_SIGNING_SECRET || '').trim(),
+    GRAVIA_SUBSCRIPTION_ID: (process.env.GRAVIA_SUBSCRIPTION_ID || '').trim(),
+    GRAVIA_PUBLIC_BASE_URL: (
+        process.env.GRAVIA_PUBLIC_BASE_URL || 'https://btc.webwien.at'
+    )
+        .trim()
+        .replace(/\/$/, ''),
+    GRAVIA_WEBHOOK_PATH: (process.env.GRAVIA_WEBHOOK_PATH || '/api/webhooks/gravia').trim(),
+    /**
+     * When Gravia feed is on, Polymarket poll uses at least this many seconds
+     * (fallback / catch-up). Override with FETCH_INTERVAL if higher.
+     */
+    GRAVIA_POLL_FALLBACK_SECONDS: parseInt(
+        process.env.GRAVIA_POLL_FALLBACK_SECONDS || '90',
+        10
+    ),
 };

@@ -174,7 +174,7 @@ const fetchTradeData = async () => {
                     activity.outcome ||
                     activity.asset.slice(0, 12);
                 Logger.info(
-                    `New trade detected for ${address.slice(0, 6)}...${address.slice(-4)} · ` +
+                    `[poll] New trade for ${address.slice(0, 6)}...${address.slice(-4)} · ` +
                         `${side} $${Number(activity.usdcSize || 0).toFixed(2)} · ${market}`
                 );
             }
@@ -266,19 +266,34 @@ export const primeHistoricalTrades = async (): Promise<void> => {
     Logger.separator();
 };
 
+/** Effective poll interval: slower fallback when Gravia push feed is on. */
+const getPollIntervalSeconds = (): number => {
+    if (!ENV.GRAVIA_FEED_ENABLED) return ENV.FETCH_INTERVAL;
+    const floor = Number.isFinite(ENV.GRAVIA_POLL_FALLBACK_SECONDS)
+        ? Math.max(30, ENV.GRAVIA_POLL_FALLBACK_SECONDS)
+        : 90;
+    return Math.max(ENV.FETCH_INTERVAL, floor);
+};
+
 const tradeMonitor = async () => {
     if (!historyPrimed) {
         await primeHistoricalTrades();
     }
+    const interval = getPollIntervalSeconds();
     Logger.success(
-        `Monitoring ${getUserAddresses().length} trader(s) every ${ENV.FETCH_INTERVAL}s`
+        `Monitoring ${getUserAddresses().length} trader(s) every ${interval}s` +
+            (ENV.GRAVIA_FEED_ENABLED
+                ? ' (Polymarket poll fallback; Gravia webhooks are primary)'
+                : '')
     );
     Logger.separator();
 
     while (isRunning) {
         await fetchTradeData();
         if (!isRunning) break;
-        await new Promise((resolve) => setTimeout(resolve, ENV.FETCH_INTERVAL * 1000));
+        await new Promise((resolve) =>
+            setTimeout(resolve, getPollIntervalSeconds() * 1000)
+        );
     }
 
     Logger.info('Trade monitor stopped');

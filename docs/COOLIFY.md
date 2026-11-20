@@ -104,6 +104,38 @@ curl http://localhost:3000/health
 docker compose logs -f bot
 ```
 
+## Gravia trade webhooks (optional, recommended)
+
+AgreeBot can receive fills via Gravia instead of relying only on Polymarket polling.
+
+1. Set in Coolify (same values as local `.env`):
+   - `GRAVIA_FEED_ENABLED=true`
+   - `GRAVIA_API` (Authorization key, no `Bearer`)
+   - `GRAVIA_SIGNING_SECRET`
+   - `GRAVIA_SUBSCRIPTION_ID`
+   - `GRAVIA_PUBLIC_BASE_URL=https://btc.webwien.at` (your public dashboard URL)
+2. Deploy. On boot the bot PUTs the subscription to  
+   `https://btc.webwien.at/api/webhooks/gravia` with `status=active` and dashboard wallets as `wallet_addresses`.
+3. Test delivery:
+
+```bash
+# From repo root (loads .env):
+npx ts-node src/scripts/testGraviaWebhook.ts
+
+# Or manually:
+curl -X POST "https://data.gravia.trade/v1/webhooks/$GRAVIA_SUBSCRIPTION_ID/test" \
+  -H "Authorization: $GRAVIA_API" \
+  -H 'Content-Type: application/json' \
+  --data '{}'
+```
+
+Expect HTTP 200 from Gravia with `data.success: true`, and a `[gravia] test callback ok` line in Next/dashboard logs.  
+If deliveries fail repeatedly, Gravia sets the subscription to `disabled` — fix the receiver, then redeploy or save traders in Settings (re-syncs + reactivates).
+
+HMAC auth is on the webhook route; dashboard login middleware skips `/api/webhooks/gravia`.
+
+Order placement still uses Polymarket CLOB (`postOrder`), not Gravia.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -112,6 +144,7 @@ docker compose logs -f bot
 | `Missing required environment variables` | Add every required key from the table above |
 | No trades | Confirm trader addresses, `TOO_OLD_TIMESTAMP`, and that consensus isn’t waiting forever (`/health` shows `pending` groups) |
 | Order failures | Check USDC balance, POL for gas, and RPC |
+| Gravia test times out / subscription `disabled` | Confirm public URL HTTPS, HMAC secret matches, and `/api/webhooks/gravia` returns 2xx; then re-sync (bot restart or Settings save) |
 
 ## Notes
 

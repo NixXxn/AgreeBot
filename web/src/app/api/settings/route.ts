@@ -570,6 +570,21 @@ export async function PUT(request: Request) {
 
     const botReload = await notifyBotRuntimeReload();
 
+    // Keep Gravia wallet filter in sync when traders change
+    let graviaSync: { ok: boolean; message: string } | null = null;
+    if (update.traders !== undefined) {
+      try {
+        const { syncGraviaSubscription } = await import('@/lib/graviaClient');
+        graviaSync = await syncGraviaSubscription(settings.traders);
+      } catch (err) {
+        graviaSync = {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        };
+        console.warn('Gravia subscription sync after settings save:', graviaSync.message);
+      }
+    }
+
     // Re-read after bot reload so previewMode matches the process that trades
     const envAfter = await buildEnvView();
     const settingsAfter = envToSettings(envAfter);
@@ -580,6 +595,7 @@ export async function PUT(request: Request) {
       traderLabels,
       overrides: await getRuntimeOverrides().catch(() => ({})),
       botReload,
+      graviaSync,
       message: botReload.ok
         ? `Settings saved. ${botReload.message} · mode=${settingsAfter.botSettings.previewMode ? 'paper' : 'live'}`
         : `Settings saved to MongoDB. ${botReload.message}`,

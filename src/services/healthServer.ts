@@ -107,6 +107,11 @@ export const startHealthServer = (): void => {
                 const { ensureClobClient, getClobClient } = await import('./clobClientHolder');
                 await applyRuntimeOverrides();
                 await ensureClobClient();
+                let gravia: { ok: boolean; message: string } | undefined;
+                if (ENV.GRAVIA_FEED_ENABLED) {
+                    const { syncGraviaSubscription } = await import('./graviaSync');
+                    gravia = await syncGraviaSubscription(ENV.USER_ADDRESSES);
+                }
                 Logger.success(
                     `Runtime settings reloaded (minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length}, paper=${ENV.PAPER_MODE}, clob=${!!getClobClient()})`
                 );
@@ -122,6 +127,7 @@ export const startHealthServer = (): void => {
                     },
                     paperMode: ENV.PAPER_MODE,
                     clobReady: !!getClobClient(),
+                    gravia,
                 });
             } catch (error) {
                 json(res, 500, {

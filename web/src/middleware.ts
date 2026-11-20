@@ -37,6 +37,10 @@ function isPublicPath(pathname: string): boolean {
   if (pathname === '/api/health' || pathname === '/health' || pathname === '/healthz') {
     return true;
   }
+  // Gravia HMAC-signed trade callbacks (no dashboard session)
+  if (pathname === '/api/webhooks/gravia') {
+    return true;
+  }
   return false;
 }
 

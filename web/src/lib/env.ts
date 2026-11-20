@@ -39,6 +39,12 @@ export function readEnvFileValue(key: string): string | undefined {
   return undefined;
 }
 
+/** process.env first, then parent ../.env (local Next + Coolify). */
+export function getEnvValue(key: string): string {
+  if (process.env[key]) return stripQuotes(process.env[key] as string);
+  return readEnvFileValue(key) || '';
+}
+
 /** Join base + path safely (handles missing/extra slashes and quoted bases). */
 export function joinUrl(base: string, pathPart: string): string {
   const cleaned = stripQuotes(base || '').replace(/\/+$/, '');
