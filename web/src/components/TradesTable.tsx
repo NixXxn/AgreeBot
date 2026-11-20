@@ -205,13 +205,16 @@ export function TradesTable() {
                       {trade.side}
                     </Badge>
                   </TableCell>
-                  <TableCell className="max-w-[180px]">
+                  <TableCell className="max-w-[180px] overflow-hidden">
                     {trade.agreeingTraders.length > 0 ? (
                       <div
-                        className="text-xs font-mono text-muted-foreground break-all"
+                        className="truncate text-xs font-mono text-muted-foreground"
                         title={trade.agreeingTraders.join('\n')}
                       >
-                        {trade.agreeingTraders.map(shortAddr).join(', ')}
+                        {trade.agreeingTraders.slice(0, 2).map(shortAddr).join(', ')}
+                        {trade.agreeingTraders.length > 2
+                          ? ` +${trade.agreeingTraders.length - 2}`
+                          : ''}
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>

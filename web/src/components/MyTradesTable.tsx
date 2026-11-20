@@ -258,10 +258,17 @@ function TradesList({
                 <span className="text-muted-foreground ml-1">({trade.outcome})</span>
               </TableCell>
               <TableCell
-                className="text-xs font-mono text-muted-foreground max-w-[160px]"
+                className="max-w-[160px] overflow-hidden text-xs font-mono text-muted-foreground"
                 title={wallets.join('\n')}
               >
-                {wallets.length > 0 ? wallets.map(short).join(', ') : '—'}
+                {wallets.length > 0 ? (
+                  <div className="truncate">
+                    {wallets.slice(0, 2).map(short).join(', ')}
+                    {wallets.length > 2 ? ` +${wallets.length - 2}` : ''}
+                  </div>
+                ) : (
+                  '—'
+                )}
               </TableCell>
               <TableCell className="text-right font-mono">
                 {formatCurrency(trade.usdcSize)}
