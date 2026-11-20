@@ -68,7 +68,9 @@ export async function GET(request: Request) {
     if (!mode.paperMode) {
       try {
         const clob = await fetchBotClobBalance();
-        if (clob && Number.isFinite(clob.usdc)) clobUsdc = clob.usdc;
+        if (clob && clob.source !== 'paper' && Number.isFinite(clob.usdc)) {
+          clobUsdc = clob.usdc;
+        }
       } catch {
         /* optional */
       }

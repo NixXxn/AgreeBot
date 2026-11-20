@@ -113,10 +113,22 @@ export function BotSettingsSection({
             <div className="grid grid-cols-2 gap-4">
             <div className="p-3 bg-muted/50 rounded-lg">
               <p className="text-xs text-muted-foreground mb-1">
-                Trading balance (CLOB)
+                {balance.source === 'paper' || balance.paperMode
+                  ? 'Paper balance'
+                  : 'Trading balance (CLOB)'}
               </p>
-              <p className={`text-xl font-bold font-mono ${balance.usdc < 10 ? 'text-yellow-500' : 'text-green-500'}`}>
-                ${balance.usdc.toFixed(2)}
+              <p
+                className={`text-xl font-bold font-mono ${
+                  balance.source === 'clob-unavailable'
+                    ? 'text-muted-foreground'
+                    : balance.usdc < 10
+                      ? 'text-yellow-500'
+                      : 'text-green-500'
+                }`}
+              >
+                {balance.source === 'clob-unavailable'
+                  ? '—'
+                  : `$${balance.usdc.toFixed(2)}`}
               </p>
             </div>
               <div className="p-3 bg-muted/50 rounded-lg">

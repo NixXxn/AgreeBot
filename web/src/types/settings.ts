@@ -90,6 +90,9 @@ export interface BalanceInfo {
   usdc: number;
   matic: number;
   proxyWallet: string;
+  /** paper | clob | clob-unavailable | on-chain */
+  source?: string;
+  paperMode?: boolean;
 }
 
 export interface AutoClaimHistoryEntry {

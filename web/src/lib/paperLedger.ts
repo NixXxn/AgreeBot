@@ -72,7 +72,8 @@ export async function resetPaperStats(): Promise<{
       : new Error('Failed to clear paper ledger file');
   }
 
-  const healthPort = process.env.HEALTH_PORT || '3001';
+  const { resolveBotHealthPort } = await import('@/lib/botMode');
+  const healthPort = resolveBotHealthPort();
   try {
     const res = await fetch(`http://127.0.0.1:${healthPort}/paper/reset`, {
       method: 'POST',

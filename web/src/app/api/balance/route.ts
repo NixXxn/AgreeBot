@@ -56,33 +56,25 @@ export async function GET() {
       );
     }
 
-    const result: BalanceInfo & { source?: string; paperMode?: boolean } = {
+    const result: BalanceInfo = {
       usdc: 0,
       matic: 0,
       proxyWallet,
-      source: 'on-chain',
+      source: 'clob-unavailable',
       paperMode: false,
     };
 
-    // Prefer CLOB collateral via bot (signature-type-3 trading cash)
+    // Prefer CLOB collateral via bot (signature-type-3 trading cash).
+    // Do not fall back to on-chain USDC.e here — deposit wallets often show $0
+    // on-chain while CLOB collateral is funded, which made live mode look empty.
     const clob = await fetchBotClobBalance();
-    if (clob) {
+    if (clob && clob.source !== 'paper') {
       result.usdc = clob.usdc;
       result.source = clob.source;
       if (clob.proxyWallet) result.proxyWallet = clob.proxyWallet;
     } else {
-      // Fallback: on-chain USDC.e (often $0 for Polymarket deposit wallets)
-      const usdcContract =
-        getProcessOrFileEnv('USDC_CONTRACT_ADDRESS') ||
-        '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-      const usdcData = `0x70a08231000000000000000000000000${proxyWallet.slice(2)}`;
-      const raw = await rpcCall(rpcUrl, 'eth_call', [
-        { to: usdcContract, data: usdcData },
-        'latest',
-      ]);
-      if (raw) {
-        result.usdc = Number(BigInt(raw)) / 1e6;
-      }
+      result.source = 'clob-unavailable';
+      // Keep usdc at 0 but mark unavailable so UI can show "—" via source check
     }
 
     const maticRaw = await rpcCall(rpcUrl, 'eth_getBalance', [

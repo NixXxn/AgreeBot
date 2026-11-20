@@ -48,9 +48,14 @@ export type BotHealthMode = {
   source: 'bot' | 'mongo' | 'env';
 };
 
+/** Bot health port inside the container (Dockerfile default 3001; Next is 3000). */
+export function resolveBotHealthPort(): string {
+  return getProcessOrFileEnv('HEALTH_PORT') || '3001';
+}
+
 /** Ask the running bot process for its actual paper/live mode. */
 export async function fetchBotHealthMode(): Promise<BotHealthMode | null> {
-  const healthPort = process.env.HEALTH_PORT || '3001';
+  const healthPort = resolveBotHealthPort();
   try {
     const res = await fetch(`http://127.0.0.1:${healthPort}/health`, {
       method: 'GET',
@@ -127,21 +132,26 @@ export async function fetchBotClobBalance(): Promise<{
   source: string;
   paperMode?: boolean;
 } | null> {
-  const healthPort = process.env.HEALTH_PORT || '3001';
+  const healthPort = resolveBotHealthPort();
   try {
     const res = await fetch(`http://127.0.0.1:${healthPort}/balance`, {
       method: 'GET',
       signal: AbortSignal.timeout(15000),
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     const body = (await res.json()) as {
       ok?: boolean;
-      usdc?: number;
+      usdc?: number | null;
       proxyWallet?: string;
       source?: string;
       paperMode?: boolean;
+      error?: string;
     };
-    if (body.ok === false || typeof body.usdc !== 'number') return null;
+    // Live CLOB miss — do not treat as $0
+    if (body.ok === false || typeof body.usdc !== 'number' || !Number.isFinite(body.usdc)) {
+      return null;
+    }
     return {
       usdc: body.usdc,
       proxyWallet: body.proxyWallet || '',

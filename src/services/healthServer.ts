@@ -82,24 +82,43 @@ export const startHealthServer = (): void => {
         // Dashboard Settings / health — paper bankroll or CLOB collateral
         if (url === '/balance' && method === 'GET') {
             try {
-                if (ENV.PAPER_MODE && ENV.PAPER_BALANCE_USD > 0) {
+                if (ENV.PAPER_MODE) {
+                    const paper =
+                        Number.isFinite(ENV.PAPER_BALANCE_USD) && ENV.PAPER_BALANCE_USD > 0
+                            ? ENV.PAPER_BALANCE_USD
+                            : 0;
                     json(res, 200, {
                         ok: true,
-                        usdc: ENV.PAPER_BALANCE_USD,
+                        usdc: paper,
                         proxyWallet: ENV.PROXY_WALLET || '',
                         source: 'paper',
                         paperMode: true,
                     });
                     return;
                 }
-                const getMyBalance = (await import('../utils/getMyBalance')).default;
-                const usdc = await getMyBalance(ENV.PROXY_WALLET);
+
+                // Live: use shared CLOB client only (do not fall back to on-chain $0)
+                const { ensureClobClient } = await import('./clobClientHolder');
+                await ensureClobClient();
+                const { getClobCollateralBalance } = await import('../utils/getMyBalance');
+                const usdc = await getClobCollateralBalance();
+                if (usdc === null) {
+                    json(res, 200, {
+                        ok: false,
+                        usdc: null,
+                        proxyWallet: ENV.PROXY_WALLET || '',
+                        source: 'clob',
+                        paperMode: false,
+                        error: 'CLOB balance unavailable — client not ready or fetch failed',
+                    });
+                    return;
+                }
                 json(res, 200, {
                     ok: true,
                     usdc,
-                    proxyWallet: ENV.PROXY_WALLET,
+                    proxyWallet: ENV.PROXY_WALLET || '',
                     source: 'clob',
-                    paperMode: ENV.PAPER_MODE,
+                    paperMode: false,
                 });
             } catch (error) {
                 json(res, 500, {

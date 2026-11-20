@@ -1,14 +1,11 @@
 import { ethers } from 'ethers';
-import { AssetType, ClobClient } from '@polymarket/clob-client-v2';
+import { AssetType } from '@polymarket/clob-client-v2';
 import { ENV } from '../config/env';
 import { createPolygonProvider } from './rpcProvider';
 import Logger from './logger';
 
 const USDC_CONTRACT_ADDRESS = ENV.USDC_CONTRACT_ADDRESS;
 const USDC_ABI = ['function balanceOf(address owner) view returns (uint256)'];
-
-let cachedClob: ClobClient | null = null;
-let clobInit: Promise<ClobClient> | null = null;
 
 const parseClobAmount = (raw: string | undefined): number | null => {
     if (raw === undefined || raw === null || raw === '') return null;
@@ -21,32 +18,27 @@ const parseClobAmount = (raw: string | undefined): number | null => {
 };
 
 /**
- * Polymarket trading balance (CLOB collateral) — this is what signature-type-3
- * deposit wallets actually fund. Wallet ERC-20 USDC is often $0.
+ * Polymarket trading balance (CLOB collateral) via the shared live CLOB client.
+ * Returns null in paper mode or when the client is unavailable.
  */
-const getClobCollateralBalance = async (): Promise<number | null> => {
-    if (ENV.PAPER_MODE || !ENV.PRIVATE_KEY?.trim()) return null;
+export const getClobCollateralBalance = async (): Promise<number | null> => {
+    if (ENV.PAPER_MODE) return null;
+    if (!ENV.PRIVATE_KEY?.trim() || !ENV.PROXY_WALLET?.trim()) return null;
 
     try {
-        if (!cachedClob) {
-            if (!clobInit) {
-                clobInit = (async () => {
-                    const createClobClient = (await import('./createClobClient')).default;
-                    return createClobClient();
-                })();
-            }
-            cachedClob = await clobInit;
-        }
+        const { ensureClobClient } = await import('../services/clobClientHolder');
+        const clob = await ensureClobClient();
+        if (!clob) return null;
 
         const params = { asset_type: AssetType.COLLATERAL } as const;
         try {
-            await cachedClob.updateBalanceAllowance(params);
+            await clob.updateBalanceAllowance(params);
         } catch {
             /* cache refresh is best-effort */
         }
 
         const response: { balance?: string; error?: string } =
-            await cachedClob.getBalanceAllowance(params);
+            await clob.getBalanceAllowance(params);
 
         if (response && typeof response === 'object' && 'error' in response && response.error) {
             Logger.warning(`CLOB balance error: ${response.error}`);
@@ -58,8 +50,6 @@ const getClobCollateralBalance = async (): Promise<number | null> => {
         Logger.warning(
             `CLOB balance fetch failed: ${error instanceof Error ? error.message : String(error)}`
         );
-        cachedClob = null;
-        clobInit = null;
         return null;
     }
 };

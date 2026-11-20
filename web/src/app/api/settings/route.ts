@@ -9,6 +9,7 @@ import {
   saveRuntimeOverrides,
 } from '@/lib/runtimeSettings';
 import { stripQuotes } from '@/lib/env';
+import { resolveBotHealthPort } from '@/lib/botMode';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -24,7 +25,7 @@ async function notifyBotRuntimeReload(): Promise<{
   paperMode?: boolean;
   clobReady?: boolean;
 }> {
-  const healthPort = process.env.HEALTH_PORT || '3001';
+  const healthPort = resolveBotHealthPort();
   try {
     const res = await fetch(`http://127.0.0.1:${healthPort}/runtime/reload`, {
       method: 'POST',
