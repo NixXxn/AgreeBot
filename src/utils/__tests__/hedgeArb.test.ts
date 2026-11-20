@@ -1,4 +1,5 @@
 import {
+    ceilToTick,
     computeHedgeArbPlan,
     findOppositePosition,
     floorToTick,
@@ -37,6 +38,13 @@ describe('floorToTick', () => {
     it('rounds down to cents', () => {
         expect(floorToTick(0.419)).toBe(0.41);
         expect(floorToTick(0.41)).toBe(0.41);
+    });
+});
+
+describe('ceilToTick', () => {
+    it('rounds up to cents', () => {
+        expect(ceilToTick(0.411)).toBe(0.42);
+        expect(ceilToTick(0.41)).toBe(0.41);
     });
 });
 

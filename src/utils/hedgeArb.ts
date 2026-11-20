@@ -113,6 +113,14 @@ export const floorToTick = (price: number, tick = 0.01): number => {
     return Number((scaled * tick).toFixed(decimals));
 };
 
+/** Round price up to tick (default 1¢). */
+export const ceilToTick = (price: number, tick = 0.01): number => {
+    if (!(price > 0) || !(tick > 0)) return 0;
+    const decimals = Math.max(0, Math.round(-Math.log10(tick)));
+    const scaled = Math.ceil(price / tick - 1e-9);
+    return Number((scaled * tick).toFixed(decimals));
+};
+
 export const findOppositePosition = <
     T extends { asset: string; conditionId: string; size?: number; avgPrice?: number },
 >(

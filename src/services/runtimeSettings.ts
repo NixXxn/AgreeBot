@@ -304,6 +304,10 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
             overrides.SKIP_PRICE_SLIPPAGE.toLowerCase()
         );
     }
+    if (overrides.MAX_ENTRY_PRICE) {
+        const n = parseFloat(overrides.MAX_ENTRY_PRICE);
+        if (Number.isFinite(n) && n > 0 && n < 1) ENV.MAX_ENTRY_PRICE = n;
+    }
     if (overrides.BLOCK_OPPOSITE_SIDE !== undefined) {
         ENV.BLOCK_OPPOSITE_SIDE = overrides.BLOCK_OPPOSITE_SIDE !== 'false';
     }

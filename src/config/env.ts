@@ -483,6 +483,11 @@ export const ENV = {
         (process.env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
     ),
     /**
+     * Skip BUY entries when market/ask price is above this (default 0.90).
+     * Near-certainty prices leave too little edge after maker/taker fees.
+     */
+    MAX_ENTRY_PRICE: parseFloat(process.env.MAX_ENTRY_PRICE || '0.90'),
+    /**
      * When true (default): never buy the opposite outcome of a market we already hold.
      * When false: fall back to HEDGE_ARB_* market/limit behavior.
      */

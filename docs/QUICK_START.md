@@ -163,7 +163,7 @@ your_trade_size = trader_trade_size × ratio
 ### 4. Executes Order
 
 - Places market order at best available price
-- Uses Fill-or-Kill (FOK) order type
+- Uses GTC post-only (maker) limits; skips buys above MAX_ENTRY_PRICE (default $0.90)
 - Retries up to 3 times if initial order fails
 
 ### 5. Logs Result
