@@ -49,63 +49,37 @@ const fingerprintUserAddresses = (raw: string): string =>
     createHash('sha256').update(stripQuotes(raw)).digest('hex');
 
 /**
- * When Coolify USER_ADDRESSES changes, copy it into Mongo so Settings/Coolify stay aligned.
- * First run: store fingerprint only (do not overwrite an existing Settings list).
+ * One-time: if Mongo has no trader list yet but legacy env still has addresses,
+ * seed Mongo so dashboard owns them going forward. Never re-sync from Coolify.
  */
-const syncCoolifyUserAddresses = async (): Promise<void> => {
-    const coolifyRaw = stripQuotes(process.env.USER_ADDRESSES || '');
-    const fp = fingerprintUserAddresses(coolifyRaw);
-    const addresses = parseUserAddresses(coolifyRaw);
+const migrateLegacyUserAddressesToMongo = async (): Promise<void> => {
+    const legacy = parseUserAddresses(process.env.USER_ADDRESSES || '');
+    if (legacy.length === 0) return;
 
     try {
         const doc = await RuntimeSettings.findById(RUNTIME_SETTINGS_ID).lean().exec();
-        const prevFp =
-            doc && typeof (doc as { coolifyUserAddressesFp?: string }).coolifyUserAddressesFp === 'string'
-                ? (doc as { coolifyUserAddressesFp?: string }).coolifyUserAddressesFp
-                : undefined;
-
-        if (prevFp === undefined) {
-            // Fingerprint only — never touch `values` here (avoids path conflicts with paper sync)
-            await RuntimeSettings.findByIdAndUpdate(
-                RUNTIME_SETTINGS_ID,
-                {
-                    $set: { coolifyUserAddressesFp: fp, updatedAt: new Date() },
-                },
-                { upsert: true }
-            );
-            return;
-        }
-
-        if (prevFp === fp) return;
-
-        if (addresses.length === 0) {
-            await RuntimeSettings.findByIdAndUpdate(RUNTIME_SETTINGS_ID, {
-                $set: { coolifyUserAddressesFp: fp, updatedAt: new Date() },
-            });
-            Logger.warning(
-                'Coolify USER_ADDRESSES changed but parsed empty — keeping Mongo trader list'
-            );
-            return;
-        }
+        const values =
+            doc?.values && typeof doc.values === 'object'
+                ? (doc.values as Record<string, unknown>)
+                : {};
+        if (Object.prototype.hasOwnProperty.call(values, 'USER_ADDRESSES')) return;
 
         await RuntimeSettings.findByIdAndUpdate(
             RUNTIME_SETTINGS_ID,
             {
                 $set: {
-                    'values.USER_ADDRESSES': addresses.join(','),
-                    coolifyUserAddressesFp: fp,
+                    'values.USER_ADDRESSES': legacy.join(','),
                     updatedAt: new Date(),
                 },
             },
             { upsert: true }
         );
-
         Logger.success(
-            `Coolify USER_ADDRESSES changed — adopted ${addresses.length} trader(s) into Mongo`
+            `Migrated ${legacy.length} trader(s) from legacy USER_ADDRESSES env → Mongo (dashboard owns the list now; remove USER_ADDRESSES from Coolify)`
         );
     } catch (error) {
         Logger.warning(
-            `Could not sync Coolify USER_ADDRESSES: ${
+            `Could not migrate legacy USER_ADDRESSES: ${
                 error instanceof Error ? error.message : String(error)
             }`
         );
@@ -218,10 +192,6 @@ export const getRuntimeOverrides = async (): Promise<Record<string, string>> => 
     }
 };
 
-/**
- * Apply Mongo dashboard overrides on top of Coolify/process env.
- * Mutates ENV.USER_ADDRESSES in place so existing module refs stay valid.
- */
 const isTruthy = (value: string | undefined): boolean =>
     ['true', '1', 'yes', 'on'].includes((value || '').trim().toLowerCase());
 
@@ -260,7 +230,7 @@ const applyPaperModeOverride = (overrides: Record<string, string>): void => {
 };
 
 export const applyRuntimeOverrides = async (): Promise<void> => {
-    await syncCoolifyUserAddresses();
+    await migrateLegacyUserAddressesToMongo();
     await syncCoolifyPaperMode();
 
     const overrides = await getRuntimeOverrides();
@@ -268,19 +238,23 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     // Always resolve paper/live — even when Mongo has no other overrides
     applyPaperModeOverride(overrides);
 
+    // Traders: Mongo/dashboard only (empty list if not configured yet)
+    const addresses = Object.prototype.hasOwnProperty.call(overrides, 'USER_ADDRESSES')
+        ? parseUserAddresses(overrides.USER_ADDRESSES || '')
+        : [];
+    ENV.USER_ADDRESSES.length = 0;
+    ENV.USER_ADDRESSES.push(...addresses);
+    if (addresses.length > 0) {
+        Logger.success(`Loaded ${addresses.length} trader(s) from dashboard (Mongo)`);
+    } else {
+        Logger.warning(
+            'No traders in dashboard Settings — add wallets there (comma-separated paste supported)'
+        );
+    }
+
     if (Object.keys(overrides).length === 0) {
         Logger.info('No dashboard runtime overrides in Mongo');
         return;
-    }
-
-    // Explicit key means dashboard owns the list (including empty clear)
-    if (Object.prototype.hasOwnProperty.call(overrides, 'USER_ADDRESSES')) {
-        const addresses = parseUserAddresses(overrides.USER_ADDRESSES || '');
-        ENV.USER_ADDRESSES.length = 0;
-        ENV.USER_ADDRESSES.push(...addresses);
-        Logger.success(
-            `Loaded ${addresses.length} trader(s) from dashboard overrides (Mongo)`
-        );
     }
 
     if (overrides.CONSENSUS_ENABLED !== undefined) {

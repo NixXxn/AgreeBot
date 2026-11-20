@@ -28,15 +28,16 @@ In the Coolify app → **Environment Variables**, set at least:
 
 | Key | Example / notes |
 | --- | --- |
-| `USER_ADDRESSES` | Already in `.env.example` (50 wallets) — paste that list, **no wrapping quotes** |
-| `PROXY_WALLET` | Your Polygon address: `0x` + 40 hex chars. **Required** — empty value crashes the bot |
-| `PRIVATE_KEY` | Key **without** `0x` — mark as secret. **Required** |
-| `MONGO_URI` | `mongodb+srv://...` Atlas string |
+| `MONGO_URI` | `mongodb+srv://...` Atlas string — **required** (traders live here via dashboard Settings) |
+| `PROXY_WALLET` | Your Polygon address: `0x` + 40 hex chars. **Required** for live — empty value crashes the bot |
+| `PRIVATE_KEY` | Key **without** `0x` — mark as secret. **Required** for live |
 | `RPC_URL` | Polygon RPC (avoid bare publicnode — redeems need receipt access; Alchemy/Infura/1rpc) |
 | `CLOB_HTTP_URL` | `https://clob.polymarket.com/` |
 | `CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws` |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` |
 | `HEALTH_PORT` | `3000` |
+
+**Traders:** do **not** set `USER_ADDRESSES` in Coolify. Open the dashboard → Settings → paste one wallet or a comma-separated list. They persist in Mongo across redeploys.
 
 **Coolify tip:** paste values without quotes.  
 Bad: `PROXY_WALLET=''` or `PROXY_WALLET='0xabc…'`  
@@ -48,13 +49,12 @@ To monitor traders and log signals without trading:
 
 ```bash
 PAPER_MODE=true
-USER_ADDRESSES=0xTrader1,0xTrader2,...
 MONGO_URI=mongodb+srv://...
 CONSENSUS_ENABLED=true   # optional
 CONSENSUS_MIN_AGREEMENT=2
 ```
 
-`PROXY_WALLET` and `PRIVATE_KEY` are **not required**. Logs will show `[PAPER] Would BUY/SELL …` instead of placing orders. Set `PAPER_MODE=false` and add wallet credentials when you go live.
+Then add traders in the dashboard Settings (comma-separated paste works). `PROXY_WALLET` and `PRIVATE_KEY` are **not required**. Logs will show `[PAPER] Would BUY/SELL …` instead of placing orders. Set `PAPER_MODE=false` and add wallet credentials when you go live.
 
 ### Consensus (recommended for AgreeBot)
 

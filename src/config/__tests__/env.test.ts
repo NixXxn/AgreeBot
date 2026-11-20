@@ -6,8 +6,22 @@
 describe('Environment variable parsing', () => {
     const originalEnv = process.env;
 
+    const setLiveBase = () => {
+        process.env.PROXY_WALLET = '0x1111111111111111111111111111111111111111';
+        process.env.PRIVATE_KEY = 'testkey';
+        process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
+        process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
+        process.env.MONGO_URI = 'mongodb://localhost:27017/test';
+        process.env.RPC_URL = 'https://polygon-rpc.com';
+        process.env.USDC_CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
+        // Prevent dotenv/.env from filling aliases
+        process.env.POLY_FUNDER = '';
+        process.env.POLY_PRIVATE_KEY = '';
+        process.env.PAPER_MODE = 'false';
+        process.env.PREVIEW_MODE = 'false';
+    };
+
     beforeEach(() => {
-        // Reset process.env before each test
         jest.resetModules();
         process.env = { ...originalEnv };
     });
@@ -16,61 +30,37 @@ describe('Environment variable parsing', () => {
         process.env = originalEnv;
     });
 
-    it('should parse comma-separated USER_ADDRESSES', () => {
+    it('should soft-parse optional legacy USER_ADDRESSES (not required)', () => {
+        setLiveBase();
         process.env.USER_ADDRESSES =
             '0x1234567890123456789012345678901234567890, 0x0987654321098765432109876543210987654321';
-        process.env.PROXY_WALLET = '0x1111111111111111111111111111111111111111';
-        process.env.PRIVATE_KEY = 'testkey';
-        process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
-        process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
-        process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        process.env.RPC_URL = 'https://polygon-rpc.com';
-        process.env.USDC_CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
 
         const { ENV } = require('../env');
         expect(ENV.USER_ADDRESSES).toHaveLength(2);
         expect(ENV.USER_ADDRESSES[0]).toBe('0x1234567890123456789012345678901234567890');
     });
 
-    it('should parse JSON array USER_ADDRESSES', () => {
-        process.env.USER_ADDRESSES =
-            '["0x1234567890123456789012345678901234567890", "0x0987654321098765432109876543210987654321"]';
-        process.env.PROXY_WALLET = '0x1111111111111111111111111111111111111111';
-        process.env.PRIVATE_KEY = 'testkey';
-        process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
-        process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
-        process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        process.env.RPC_URL = 'https://polygon-rpc.com';
-        process.env.USDC_CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
+    it('should allow empty USER_ADDRESSES (dashboard owns traders)', () => {
+        setLiveBase();
+        // Empty string wins over dotenv so .env cannot resurrect traders
+        process.env.USER_ADDRESSES = '';
 
         const { ENV } = require('../env');
-        expect(ENV.USER_ADDRESSES).toHaveLength(2);
+        expect(ENV.USER_ADDRESSES).toEqual([]);
     });
 
-    it('should reject invalid Ethereum address', () => {
-        process.env.USER_ADDRESSES = 'invalid-address';
-        process.env.PROXY_WALLET = '0x1111111111111111111111111111111111111111';
-        process.env.PRIVATE_KEY = 'testkey';
-        process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
-        process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
-        process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        process.env.RPC_URL = 'https://polygon-rpc.com';
-        process.env.USDC_CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
+    it('should skip invalid addresses in legacy USER_ADDRESSES instead of throwing', () => {
+        setLiveBase();
+        process.env.USER_ADDRESSES =
+            'invalid-address,0x1234567890123456789012345678901234567890';
 
-        expect(() => {
-            require('../env');
-        }).toThrow('Invalid Ethereum address');
+        const { ENV } = require('../env');
+        expect(ENV.USER_ADDRESSES).toEqual(['0x1234567890123456789012345678901234567890']);
     });
 
     it('should reject invalid FETCH_INTERVAL', () => {
-        process.env.USER_ADDRESSES = '0x1234567890123456789012345678901234567890';
-        process.env.PROXY_WALLET = '0x1111111111111111111111111111111111111111';
-        process.env.PRIVATE_KEY = 'testkey';
-        process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
-        process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
-        process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        process.env.RPC_URL = 'https://polygon-rpc.com';
-        process.env.USDC_CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
+        setLiveBase();
+        process.env.USER_ADDRESSES = '';
         process.env.FETCH_INTERVAL = '-1';
 
         expect(() => {
@@ -78,28 +68,33 @@ describe('Environment variable parsing', () => {
         }).toThrow('Invalid FETCH_INTERVAL');
     });
 
-    it('should allow missing wallet credentials in PAPER_MODE', () => {
+    it('should allow missing wallet credentials in PAPER_MODE without traders in env', () => {
         process.env.PAPER_MODE = 'true';
-        process.env.USER_ADDRESSES = '0x1234567890123456789012345678901234567890';
+        process.env.PREVIEW_MODE = 'true';
+        process.env.USER_ADDRESSES = '';
         process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        delete process.env.PROXY_WALLET;
-        delete process.env.PRIVATE_KEY;
-        delete process.env.RPC_URL;
+        process.env.PROXY_WALLET = '';
+        process.env.PRIVATE_KEY = '';
+        process.env.POLY_FUNDER = '';
+        process.env.POLY_PRIVATE_KEY = '';
+        process.env.RPC_URL = '';
 
         const { ENV } = require('../env');
         expect(ENV.PAPER_MODE).toBe(true);
         expect(ENV.PREVIEW_MODE).toBe(true);
         expect(ENV.PROXY_WALLET).toBe('');
-        expect(ENV.USER_ADDRESSES).toHaveLength(1);
+        expect(ENV.USER_ADDRESSES).toEqual([]);
     });
 
     it('should require wallet when not in paper mode', () => {
         process.env.PAPER_MODE = 'false';
         process.env.PREVIEW_MODE = 'false';
-        process.env.USER_ADDRESSES = '0x1234567890123456789012345678901234567890';
+        process.env.USER_ADDRESSES = '';
         process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-        delete process.env.PROXY_WALLET;
-        delete process.env.PRIVATE_KEY;
+        process.env.PROXY_WALLET = '';
+        process.env.PRIVATE_KEY = '';
+        process.env.POLY_FUNDER = '';
+        process.env.POLY_PRIVATE_KEY = '';
         process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
         process.env.CLOB_WS_URL = 'wss://ws.polymarket.com/ws';
         process.env.RPC_URL = 'https://polygon-rpc.com';

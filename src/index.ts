@@ -70,11 +70,10 @@ export const main = async () => {
     try {
         await connectDB();
 
-        // Dashboard edits (traders, strategy, …) live in Mongo and override Coolify env
+        // Dashboard edits (traders, strategy, …) live in Mongo
         const { applyRuntimeOverrides } = await import('./services/runtimeSettings');
         await applyRuntimeOverrides();
 
-        // USER_ADDRESSES const aliases the same array mutated by applyRuntimeOverrides
         Logger.startup(ENV.USER_ADDRESSES, PROXY_WALLET);
 
         if (ENV.PAPER_MODE) {

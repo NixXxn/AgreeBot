@@ -2,12 +2,12 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 /**
  * Dashboard-editable overrides that survive Coolify restarts.
- * Coolify process.env is the base; this document wins for matching keys.
+ * Traders (USER_ADDRESSES) are owned exclusively by this document.
  */
 export interface RuntimeSettingsDocument extends Document {
     _id: string;
     values: Record<string, string>;
-    /** SHA-256 of last-seen Coolify USER_ADDRESSES — used to detect env edits. */
+    /** @deprecated Legacy Coolify sync fingerprint — no longer written. */
     coolifyUserAddressesFp?: string;
     /** SHA-256 of last-seen Coolify PAPER_MODE / PREVIEW_MODE. */
     coolifyPaperModeFp?: string;

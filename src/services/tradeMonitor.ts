@@ -15,7 +15,9 @@ const getUserModels = () =>
 const init = async () => {
     const addresses = getUserAddresses();
     if (!addresses || addresses.length === 0) {
-        throw new Error('USER_ADDRESSES is not defined or empty');
+        throw new Error(
+            'No traders configured — add wallets in dashboard Settings (Mongo)'
+        );
     }
 
     const counts: number[] = [];

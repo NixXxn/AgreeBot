@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server';
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   getConfiguredTraderAddresses,
   getRuntimeOverrides,
-  normalizeTraderAddresses,
 } from '@/lib/runtimeSettings';
-import { getUserAddressesFromEnv } from '@/lib/mongo';
-import { stripQuotes } from '@/lib/env';
 import { buildBotCopyTraderAnalyses } from '@/lib/botAnalytics';
 import {
   fetchBotClobBalance,
@@ -17,33 +12,6 @@ import type { TraderAnalysis } from '@/types/trader';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-function parseUserAddressesFromEnv(): string[] {
-  const raw =
-    stripQuotes(process.env.USER_ADDRESSES || '') ||
-    (() => {
-      try {
-        const envPath = path.join(process.cwd(), '..', '.env');
-        if (!fs.existsSync(envPath)) return '';
-        const match = fs.readFileSync(envPath, 'utf-8').match(/^USER_ADDRESSES\s*=\s*(.+)$/m);
-        if (!match) return '';
-        return stripQuotes(match[1]);
-      } catch {
-        return '';
-      }
-    })();
-
-  const trimmed = raw.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith('[')) {
-    try {
-      return normalizeTraderAddresses(JSON.parse(trimmed) as string[]);
-    } catch {
-      return [];
-    }
-  }
-  return normalizeTraderAddresses(trimmed.split(','));
-}
 
 function placeholderTrader(address: string): TraderAnalysis {
   return {
@@ -90,10 +58,7 @@ export async function GET(request: Request) {
   const refresh = searchParams.get('refresh') === 'true';
 
   try {
-    const envAddresses = parseUserAddressesFromEnv();
-    const configured = await getConfiguredTraderAddresses(
-      envAddresses.length > 0 ? envAddresses : getUserAddressesFromEnv()
-    );
+    const configured = await getConfiguredTraderAddresses();
 
     const overrides = await getRuntimeOverrides().catch(() => ({}));
     const mode = await resolvePaperModeAsync(overrides);
@@ -109,8 +74,7 @@ export async function GET(request: Request) {
     if (configured.length === 0) {
       return NextResponse.json(
         {
-          error:
-            'No traders configured. Add wallets in Settings or set USER_ADDRESSES.',
+          error: 'No traders configured. Add wallets in Settings.',
         },
         { status: 404 }
       );
@@ -140,9 +104,12 @@ export async function GET(request: Request) {
         (balanceUsd != null ? ` · balance $${balanceUsd.toFixed(2)}` : ''),
     });
   } catch (error) {
-    console.error('Error building bot trader analytics:', error);
+    console.error('Failed to load traders:', error);
     return NextResponse.json(
-      { error: 'Failed to build bot trader analytics' },
+      {
+        error:
+          error instanceof Error ? error.message : 'Failed to load traders',
+      },
       { status: 500 }
     );
   }

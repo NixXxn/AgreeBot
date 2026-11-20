@@ -187,7 +187,7 @@ export function SettingsView() {
       void fetchAutoClaim();
       setSuccessMessage(
         data.message ||
-          `Saved ${verified.settings.traders.length} trader(s) to MongoDB. Restart the bot container to reload them.`
+          `Saved ${verified.settings.traders.length} trader(s) to MongoDB.`
       );
 
       // Clear success message after 8 seconds

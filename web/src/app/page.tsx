@@ -97,8 +97,7 @@ export default function Home() {
           <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
           <p className="text-muted-foreground mb-4">{error}</p>
           <p className="text-sm text-muted-foreground mb-4">
-            Charts need trader reports (<code className="bg-muted px-2 py-1 rounded">npm run analyze</code>).
-            You can still open Settings — tracked wallets come from <code className="bg-muted px-2 py-1 rounded">USER_ADDRESSES</code>.
+            You can still open Settings to add or paste trader wallets (stored in MongoDB).
           </p>
           <Button className="mb-4" onClick={() => setViewMode('settings')}>
             Open Settings

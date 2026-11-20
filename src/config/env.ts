@@ -39,15 +39,7 @@ const normalizeEnvValues = (): void => {
         }
         // Treat known placeholders as unset so required-env checks catch them
         if (PLACEHOLDER_VALUES.has(cleaned.toLowerCase()) || PLACEHOLDER_VALUES.has(cleaned)) {
-            if (
-                [
-                    'PROXY_WALLET',
-                    'PRIVATE_KEY',
-                    'MONGO_URI',
-                    'RPC_URL',
-                    'USER_ADDRESSES',
-                ].includes(key)
-            ) {
+            if (['PROXY_WALLET', 'PRIVATE_KEY', 'MONGO_URI', 'RPC_URL'].includes(key)) {
                 delete process.env[key];
             }
         }
@@ -79,7 +71,7 @@ const isTruthyEnv = (value: string | undefined): boolean =>
 const PAPER_MODE_ENABLED =
     isTruthyEnv(process.env.PAPER_MODE) || isTruthyEnv(process.env.PREVIEW_MODE);
 
-// Sensible defaults so paper mode can start with only USER_ADDRESSES + MONGO_URI
+// Sensible defaults so paper mode can start with only MONGO_URI (traders live in Mongo/dashboard)
 if (!process.env.CLOB_HTTP_URL) {
     process.env.CLOB_HTTP_URL = 'https://clob.polymarket.com/';
 }
@@ -105,11 +97,10 @@ const isValidEthereumAddress = (address: string): boolean => {
  * Validate required environment variables
  */
 const validateRequiredEnv = (): void => {
-    // Live trading needs a funded wallet. Paper mode only needs traders + MongoDB.
+    // Traders are managed in the dashboard (Mongo). Paper mode only needs MongoDB.
     const required = PAPER_MODE_ENABLED
-        ? ['USER_ADDRESSES', 'MONGO_URI']
+        ? ['MONGO_URI']
         : [
-              'USER_ADDRESSES',
               'PROXY_WALLET',
               'PRIVATE_KEY',
               'CLOB_HTTP_URL',
@@ -129,9 +120,10 @@ const validateRequiredEnv = (): void => {
 
     if (missing.length > 0) {
         const paperHint = PAPER_MODE_ENABLED
-            ? `Paper mode is ON — only USER_ADDRESSES and MONGO_URI are required.\n`
+            ? `Paper mode is ON — only MONGO_URI is required (add traders in the dashboard).\n`
             : `For paper/preview without a wallet, set PAPER_MODE=true (or PREVIEW_MODE=true).\n` +
-              `Otherwise set PROXY_WALLET + PRIVATE_KEY for live trading.\n`;
+              `Otherwise set PROXY_WALLET + PRIVATE_KEY for live trading.\n` +
+              `Traders are managed in the dashboard Settings, not .env.\n`;
         throw new Error(
             `Missing required environment variables: ${missing.join(', ')}\n` +
                 paperHint +
@@ -265,46 +257,36 @@ validateAddresses();
 validateNumericConfig();
 validateUrls();
 
-// Parse USER_ADDRESSES: supports both comma-separated string and JSON array
-const parseUserAddresses = (input: string): string[] => {
-    const trimmed = input.trim();
-    // Check if it's JSON array format
+/**
+ * Soft-parse optional legacy USER_ADDRESSES (comma / JSON). Invalid tokens skipped.
+ * Runtime traders come from Mongo via applyRuntimeOverrides — env is not authoritative.
+ */
+const softParseUserAddresses = (input: string | undefined): string[] => {
+    const trimmed = (input || '').trim();
+    if (!trimmed) return [];
+
+    let tokens: string[] = [];
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
         try {
             const parsed = JSON.parse(trimmed);
             if (Array.isArray(parsed)) {
-                const addresses = parsed
-                    .map((addr) => addr.toLowerCase().trim())
-                    .filter((addr) => addr.length > 0);
-                // Validate each address
-                for (const addr of addresses) {
-                    if (!isValidEthereumAddress(addr)) {
-                        throw new Error(`Invalid Ethereum address in USER_ADDRESSES: ${addr}`);
-                    }
-                }
-                return addresses;
+                tokens = parsed.map((addr) => String(addr).toLowerCase().trim());
             }
-        } catch (e) {
-            if (e instanceof Error && e.message.includes('Invalid Ethereum address')) {
-                throw e;
-            }
-            throw new Error(
-                `Invalid JSON format for USER_ADDRESSES: ${e instanceof Error ? e.message : String(e)}`
-            );
+        } catch {
+            tokens = trimmed.split(/[\s,]+/).map((addr) => addr.toLowerCase().trim());
         }
+    } else {
+        tokens = trimmed.split(',').map((addr) => addr.toLowerCase().trim());
     }
-    // Otherwise treat as comma-separated
-    const addresses = trimmed
-        .split(',')
-        .map((addr) => addr.toLowerCase().trim())
-        .filter((addr) => addr.length > 0);
-    // Validate each address
-    for (const addr of addresses) {
-        if (!isValidEthereumAddress(addr)) {
-            throw new Error(`Invalid Ethereum address in USER_ADDRESSES: ${addr}`);
-        }
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const addr of tokens) {
+        if (!addr || !isValidEthereumAddress(addr) || seen.has(addr)) continue;
+        seen.add(addr);
+        out.push(addr);
     }
-    return addresses;
+    return out;
 };
 
 // Parse copy strategy configuration
@@ -409,7 +391,8 @@ const parseCopyStrategy = (): CopyStrategyConfig => {
 };
 
 export const ENV = {
-    USER_ADDRESSES: parseUserAddresses(process.env.USER_ADDRESSES as string),
+    /** Mutated in place by applyRuntimeOverrides from Mongo (dashboard). */
+    USER_ADDRESSES: softParseUserAddresses(process.env.USER_ADDRESSES),
     PROXY_WALLET: (process.env.PROXY_WALLET || '') as string,
     PRIVATE_KEY: (process.env.PRIVATE_KEY || '') as string,
     /**

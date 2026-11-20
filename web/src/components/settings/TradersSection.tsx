@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { parseTraderListInput } from '@/lib/traders';
 
 interface TradersSectionProps {
   traders: string[];
@@ -16,50 +17,35 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
   const [newTrader, setNewTrader] = useState('');
   const [error, setError] = useState('');
 
-  const isValidAddress = (address: string): boolean => {
-    return /^0x[a-fA-F0-9]{40}$/.test(address);
-  };
-
-  const stripQuotes = (value: string): string => {
-    let v = value.trim();
-    for (let i = 0; i < 3; i++) {
-      if (
-        (v.startsWith("'") && v.endsWith("'")) ||
-        (v.startsWith('"') && v.endsWith('"'))
-      ) {
-        v = v.slice(1, -1).trim();
-        continue;
-      }
-      break;
-    }
-    return v;
-  };
-
   const handleAdd = () => {
-    const address = stripQuotes(newTrader).toLowerCase();
+    const candidates = parseTraderListInput(newTrader);
 
-    if (!address) {
-      setError('Enter an address');
+    if (candidates.length === 0) {
+      setError(
+        'Enter a valid 0x address, or paste a comma-separated / JSON list'
+      );
       return;
     }
 
-    if (!isValidAddress(address)) {
-      setError('Invalid Ethereum address format (0x + 40 hex chars)');
+    const existing = new Set(traders.map((t) => t.toLowerCase()));
+    const toAdd = candidates.filter((addr) => !existing.has(addr));
+
+    if (toAdd.length === 0) {
+      setError(
+        candidates.length === 1
+          ? 'Trader already in list'
+          : 'All pasted addresses are already in the list'
+      );
       return;
     }
 
-    if (traders.some(t => t.toLowerCase() === address)) {
-      setError('Trader already in list');
-      return;
-    }
-
-    onChange([...traders, address]);
+    onChange([...traders, ...toAdd]);
     setNewTrader('');
     setError('');
   };
 
   const handleRemove = (address: string) => {
-    onChange(traders.filter(t => t.toLowerCase() !== address.toLowerCase()));
+    onChange(traders.filter((t) => t.toLowerCase() !== address.toLowerCase()));
   };
 
   const getLabel = (address: string): string | null => {
@@ -76,12 +62,11 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
       <CardHeader>
         <CardTitle>Traders to Copy</CardTitle>
         <CardDescription>
-          Saved to MongoDB (survives Coolify restarts). Updating USER_ADDRESSES in
-          Coolify and restarting also replaces this list.
+          Managed only from this dashboard (stored in MongoDB). Paste one address
+          or a comma-separated list.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Current traders list */}
         <div className="space-y-2">
           {traders.length === 0 ? (
             <p className="text-sm text-muted-foreground">No traders configured</p>
@@ -95,9 +80,7 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
                 >
                   <div className="flex items-center gap-3">
                     <code className="text-sm font-mono">{truncateAddress(address)}</code>
-                    {label && (
-                      <Badge variant="secondary">{label}</Badge>
-                    )}
+                    {label && <Badge variant="secondary">{label}</Badge>}
                   </div>
                   <div className="flex items-center gap-2">
                     <a
@@ -123,11 +106,10 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
           )}
         </div>
 
-        {/* Add new trader */}
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
-              placeholder="0x... (Ethereum address)"
+              placeholder="0x… or paste 0xaaa,0xbbb,0xccc"
               value={newTrader}
               onChange={(e) => {
                 setNewTrader(e.target.value);
@@ -142,13 +124,12 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
               error={error}
             />
           </div>
-          <Button onClick={handleAdd}>
-            Add Trader
-          </Button>
+          <Button onClick={handleAdd}>Add</Button>
         </div>
 
         <p className="text-xs text-muted-foreground">
-          {traders.length} trader{traders.length !== 1 ? 's' : ''} configured
+          {traders.length} trader{traders.length !== 1 ? 's' : ''} configured ·
+          commas, spaces, newlines, or a JSON array all work
         </p>
       </CardContent>
     </Card>

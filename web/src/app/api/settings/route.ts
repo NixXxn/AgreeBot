@@ -248,7 +248,7 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
   const envUpdates: Record<string, string | null> = {};
 
   if (update.traders !== undefined) {
-    // Always persist (including empty) so Coolify's USER_ADDRESSES cannot resurrect
+    // Always persist to Mongo (including empty clear) — dashboard owns the list
     const normalized = normalizeTraderAddresses(update.traders);
     envUpdates.USER_ADDRESSES = normalized.join(',');
   }
@@ -515,7 +515,7 @@ export async function PUT(request: Request) {
 
     const envUpdates = settingsToEnvUpdates(update);
 
-    // Persist to Mongo so Coolify env + entrypoint rewrite cannot wipe traders
+    // Persist to Mongo (traders + other settings)
     try {
       await saveRuntimeOverrides(envUpdates);
     } catch (mongoError) {
@@ -531,12 +531,15 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Best-effort local .env write (useful for non-Docker; overwritten on Coolify restart)
+    // Best-effort local .env write for non-trader knobs only (traders stay in Mongo)
     try {
       if (fs.existsSync(ENV_PATH)) {
-        const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
-        const newEnvContent = updateEnvFile(envContent, envUpdates);
-        fs.writeFileSync(ENV_PATH, newEnvContent, 'utf-8');
+        const { USER_ADDRESSES: _skipTraders, ...fileUpdates } = envUpdates;
+        if (Object.keys(fileUpdates).length > 0) {
+          const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
+          const newEnvContent = updateEnvFile(envContent, fileUpdates);
+          fs.writeFileSync(ENV_PATH, newEnvContent, 'utf-8');
+        }
       }
     } catch (fileError) {
       console.warn('Could not write .env (Mongo save succeeded):', fileError);
@@ -546,7 +549,6 @@ export async function PUT(request: Request) {
     const settings = envToSettings(env);
     const traderLabels = getTraderLabels();
 
-    // Confirm traders survived the Coolify→Mongo merge
     if (update.traders !== undefined) {
       const saved = settings.traders;
       const expected = update.traders;
@@ -557,7 +559,7 @@ export async function PUT(request: Request) {
         return NextResponse.json(
           {
             error:
-              'Settings saved to Mongo but GET merge returned a different trader list — check MONGO_URI database name',
+              'Settings saved to Mongo but reload returned a different trader list — check MONGO_URI database name',
             settings,
             traderLabels,
           },
