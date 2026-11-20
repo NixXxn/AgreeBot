@@ -488,6 +488,13 @@ export const ENV = {
      */
     MAX_ENTRY_PRICE: parseFloat(process.env.MAX_ENTRY_PRICE || '0.90'),
     /**
+     * Copy-trade execution style: taker (FOK market, default) or maker (GTC post-only).
+     */
+    ORDER_EXECUTION: ((): 'taker' | 'maker' => {
+        const raw = (process.env.ORDER_EXECUTION || 'taker').trim().toLowerCase();
+        return raw === 'maker' ? 'maker' : 'taker';
+    })(),
+    /**
      * When true (default): never buy the opposite outcome of a market we already hold.
      * When false: fall back to HEDGE_ARB_* market/limit behavior.
      */

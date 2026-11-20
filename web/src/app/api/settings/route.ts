@@ -129,6 +129,8 @@ function envToSettings(env: Record<string, string>): BotSettings {
         (env.SKIP_PRICE_SLIPPAGE || '').toLowerCase()
       ),
       maxSlippagePercent: parseFloat(env.MAX_SLIPPAGE_PERCENT || '15') || 15,
+      orderExecution:
+        (env.ORDER_EXECUTION || 'taker').toLowerCase() === 'maker' ? 'maker' : 'taker',
     },
     adaptiveStrategy: {
       minPercent: parseFloat(env.ADAPTIVE_MIN_PERCENT || '5'),
@@ -298,6 +300,10 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
     if (update.safetyLimits.maxSlippagePercent !== undefined) {
       envUpdates.MAX_SLIPPAGE_PERCENT = update.safetyLimits.maxSlippagePercent.toString();
     }
+    if (update.safetyLimits.orderExecution !== undefined) {
+      envUpdates.ORDER_EXECUTION =
+        update.safetyLimits.orderExecution === 'maker' ? 'maker' : 'taker';
+    }
   }
 
   if (update.adaptiveStrategy) {
@@ -389,6 +395,7 @@ function envFromProcess(): Record<string, string> {
     'MAX_DAILY_VOLUME_USD',
     'SKIP_PRICE_SLIPPAGE',
     'MAX_SLIPPAGE_PERCENT',
+    'ORDER_EXECUTION',
     'ADAPTIVE_MIN_PERCENT',
     'ADAPTIVE_MAX_PERCENT',
     'ADAPTIVE_THRESHOLD_USD',

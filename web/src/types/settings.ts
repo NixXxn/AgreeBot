@@ -31,6 +31,8 @@ export interface BotSettings {
     skipPriceSlippage: boolean;
     /** Max ±% book vs last agreeing trader fill (ignored if skipPriceSlippage). */
     maxSlippagePercent: number;
+    /** taker = FOK market (default); maker = GTC post-only at last-agree price. */
+    orderExecution: 'taker' | 'maker';
   };
 
   // Adaptive Strategy (only when strategy = ADAPTIVE)

@@ -308,6 +308,10 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
         const n = parseFloat(overrides.MAX_ENTRY_PRICE);
         if (Number.isFinite(n) && n > 0 && n < 1) ENV.MAX_ENTRY_PRICE = n;
     }
+    if (overrides.ORDER_EXECUTION !== undefined) {
+        const raw = overrides.ORDER_EXECUTION.trim().toLowerCase();
+        ENV.ORDER_EXECUTION = raw === 'maker' ? 'maker' : 'taker';
+    }
     if (overrides.BLOCK_OPPOSITE_SIDE !== undefined) {
         ENV.BLOCK_OPPOSITE_SIDE = overrides.BLOCK_OPPOSITE_SIDE !== 'false';
     }
