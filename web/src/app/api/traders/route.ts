@@ -8,6 +8,7 @@ import {
   fetchBotClobBalance,
   resolvePaperModeAsync,
 } from '@/lib/botMode';
+import { resolveDisplayBalanceUsd } from '@/lib/displayBalance';
 import type { TraderAnalysis } from '@/types/trader';
 
 export const dynamic = 'force-dynamic';
@@ -63,13 +64,19 @@ export async function GET(request: Request) {
     const overrides = await getRuntimeOverrides().catch(() => ({}));
     const mode = await resolvePaperModeAsync(overrides);
 
-    let balanceUsd: number | null = null;
-    try {
-      const clob = await fetchBotClobBalance();
-      if (clob && Number.isFinite(clob.usdc)) balanceUsd = clob.usdc;
-    } catch {
-      /* optional */
+    let clobUsdc: number | null = null;
+    if (!mode.paperMode) {
+      try {
+        const clob = await fetchBotClobBalance();
+        if (clob && Number.isFinite(clob.usdc)) clobUsdc = clob.usdc;
+      } catch {
+        /* optional */
+      }
     }
+    const { balanceUsd } = resolveDisplayBalanceUsd({
+      paperMode: mode.paperMode,
+      clobUsdc,
+    });
 
     if (configured.length === 0) {
       return NextResponse.json(

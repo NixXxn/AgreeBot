@@ -54,6 +54,10 @@ export interface MyTradesResponse {
   cacheDate?: string;
   paperMode?: boolean;
   message?: string;
-  /** Current trading balance (CLOB USDC) when available */
+  /** Paper bankroll or live CLOB USDC */
   balanceUsd?: number;
+  balanceSource?: 'paper' | 'clob' | 'none';
+  /** Peak-to-trough drawdown on equity (bankroll + cumulative trade P&L) */
+  maxDrawdownUsd?: number;
+  maxDrawdownPct?: number;
 }

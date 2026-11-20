@@ -271,7 +271,11 @@ export function MyTradesView() {
           </p>
         </div>
         <div className="bg-card rounded-lg p-4 border">
-          <p className="text-sm text-muted-foreground">Balance (CLOB)</p>
+          <p className="text-sm text-muted-foreground">
+            {paperMode || data?.balanceSource === 'paper'
+              ? 'Paper balance'
+              : 'Balance (CLOB)'}
+          </p>
           <p className="text-2xl font-bold">
             {typeof data?.balanceUsd === 'number'
               ? `$${data.balanceUsd.toFixed(2)}`
@@ -293,7 +297,20 @@ export function MyTradesView() {
       </div>
 
       {/* P&L Cards - Real data from positions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        <div className="bg-card rounded-lg p-4 border">
+          <p className="text-sm text-muted-foreground">Max drawdown</p>
+          <p className="text-2xl font-bold text-red-500">
+            {typeof data?.maxDrawdownUsd === 'number'
+              ? `−$${Math.abs(data.maxDrawdownUsd).toFixed(2)}`
+              : '—'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {typeof data?.maxDrawdownPct === 'number'
+              ? `${data.maxDrawdownPct.toFixed(1)}% from peak equity`
+              : 'Peak → trough on bankroll + P&L'}
+          </p>
+        </div>
         <div className="bg-card rounded-lg p-4 border">
           <p className="text-sm text-muted-foreground">Total P&L (Real)</p>
           <p

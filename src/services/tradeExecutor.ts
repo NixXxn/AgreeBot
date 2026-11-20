@@ -522,28 +522,17 @@ const tradeExecutor = async (_initialClient?: ClobClient | null) => {
                     }
                 }
 
-                if (immediateTrades.length > 0 && consensusTrades.length === 0) {
-                    Logger.info(
-                        `${immediateTrades.length} trade(s) bypass consensus ` +
-                            `(APPLY_TO=${ENV.CONSENSUS_APPLY_TO} — e.g. SELLs run immediately)`
-                    );
-                }
-
-                // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) execute normally
+                // Non-consensus sides (e.g. SELLs when APPLY_TO=BUY) are dropped, not copied
                 if (immediateTrades.length > 0) {
-                    if (ENV.TRADE_AGGREGATION_ENABLED) {
-                        for (const trade of immediateTrades) {
-                            if (
-                                trade.side === 'BUY' &&
-                                trade.usdcSize < TRADE_AGGREGATION_MIN_TOTAL_USD
-                            ) {
-                                addToAggregationBuffer(trade);
-                            } else {
-                                await doTrading(clobClient, [trade]);
-                            }
-                        }
-                    } else {
-                        await doTrading(clobClient, immediateTrades);
+                    Logger.info(
+                        `⏭ Dropping ${immediateTrades.length} trade(s) outside CONSENSUS_APPLY_TO=${ENV.CONSENSUS_APPLY_TO}`
+                    );
+                    for (const trade of immediateTrades) {
+                        const UserActivity = getUserActivityModel(trade.userAddress);
+                        await UserActivity.updateOne(
+                            { _id: trade._id },
+                            { $set: { bot: true, botExcutedTime: 999 } }
+                        ).exec();
                     }
                 }
 

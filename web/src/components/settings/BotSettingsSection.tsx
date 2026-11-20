@@ -218,8 +218,8 @@ export function BotSettingsSection({
                     consensusApplyTo: value as BotSettings['botSettings']['consensusApplyTo']
                   })}
                   options={[
-                    { value: 'BUY', label: 'Buys only (entries)' },
-                    { value: 'SELL', label: 'Sells only (exits)' },
+                    { value: 'BUY', label: 'Buys only (drop sells)' },
+                    { value: 'SELL', label: 'Sells only (drop buys)' },
                     { value: 'BOTH', label: 'Buys and sells' },
                   ]}
                 />

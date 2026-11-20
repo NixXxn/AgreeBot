@@ -205,7 +205,9 @@ export default function Home() {
             {typeof tradersMeta.balanceUsd === 'number' && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                 <div className="bg-card rounded-lg p-4 border">
-                  <p className="text-sm text-muted-foreground">Balance (CLOB)</p>
+                  <p className="text-sm text-muted-foreground">
+                    {tradersMeta.paperMode ? 'Paper balance' : 'Balance (CLOB)'}
+                  </p>
                   <p className="text-2xl font-bold">
                     ${tradersMeta.balanceUsd.toFixed(2)}
                   </p>

@@ -79,9 +79,19 @@ export const startHealthServer = (): void => {
             return;
         }
 
-        // Dashboard Settings / health — CLOB collateral (not wallet ERC-20)
+        // Dashboard Settings / health — paper bankroll or CLOB collateral
         if (url === '/balance' && method === 'GET') {
             try {
+                if (ENV.PAPER_MODE && ENV.PAPER_BALANCE_USD > 0) {
+                    json(res, 200, {
+                        ok: true,
+                        usdc: ENV.PAPER_BALANCE_USD,
+                        proxyWallet: ENV.PROXY_WALLET || '',
+                        source: 'paper',
+                        paperMode: true,
+                    });
+                    return;
+                }
                 const getMyBalance = (await import('../utils/getMyBalance')).default;
                 const usdc = await getMyBalance(ENV.PROXY_WALLET);
                 json(res, 200, {

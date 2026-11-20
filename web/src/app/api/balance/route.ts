@@ -4,8 +4,10 @@ import { getRuntimeOverrides } from '@/lib/runtimeSettings';
 import {
   fetchBotClobBalance,
   getProcessOrFileEnv,
+  resolvePaperModeAsync,
   resolveProxyWallet,
 } from '@/lib/botMode';
+import { resolveDisplayBalanceUsd } from '@/lib/displayBalance';
 
 async function rpcCall(
   rpcUrl: string,
@@ -26,10 +28,26 @@ async function rpcCall(
 export async function GET() {
   try {
     const overrides = await getRuntimeOverrides().catch(() => ({}));
+    const mode = await resolvePaperModeAsync(overrides);
     const proxyWallet = resolveProxyWallet(overrides);
     const rpcUrl =
       getProcessOrFileEnv('RPC_URL') ||
       'https://polygon-bor-rpc.publicnode.com';
+
+    // Paper mode: show virtual bankroll even without a wallet
+    if (mode.paperMode) {
+      const { balanceUsd } = resolveDisplayBalanceUsd({
+        paperMode: true,
+        clobUsdc: null,
+      });
+      return NextResponse.json({
+        usdc: balanceUsd ?? 0,
+        matic: 0,
+        proxyWallet: proxyWallet || '',
+        source: 'paper',
+        paperMode: true,
+      } satisfies BalanceInfo & { source?: string; paperMode?: boolean });
+    }
 
     if (!proxyWallet) {
       return NextResponse.json(
@@ -38,11 +56,12 @@ export async function GET() {
       );
     }
 
-    const result: BalanceInfo & { source?: string } = {
+    const result: BalanceInfo & { source?: string; paperMode?: boolean } = {
       usdc: 0,
       matic: 0,
       proxyWallet,
       source: 'on-chain',
+      paperMode: false,
     };
 
     // Prefer CLOB collateral via bot (signature-type-3 trading cash)

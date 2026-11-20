@@ -7,6 +7,8 @@ import {
   resolvePaperModeAsync,
   resolveProxyWallet,
 } from '@/lib/botMode';
+import { resolveDisplayBalanceUsd } from '@/lib/displayBalance';
+import { computeMaxDrawdown } from '@/lib/maxDrawdown';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -18,22 +20,34 @@ export async function GET(request: Request) {
     const paperMode = mode.paperMode;
     const wallet = resolveProxyWallet(overrides);
 
-    let balanceUsd: number | null = null;
-    try {
-      const clob = await fetchBotClobBalance();
-      if (clob && Number.isFinite(clob.usdc)) balanceUsd = clob.usdc;
-    } catch {
-      /* optional */
+    let clobUsdc: number | null = null;
+    if (!paperMode) {
+      try {
+        const clob = await fetchBotClobBalance();
+        if (clob && Number.isFinite(clob.usdc)) clobUsdc = clob.usdc;
+      } catch {
+        /* optional */
+      }
     }
+
+    const { balanceUsd, source: balanceSource } = resolveDisplayBalanceUsd({
+      paperMode,
+      clobUsdc,
+    });
 
     if (paperMode) {
       const paper = await buildPaperMyTradesResponse();
+      const startingEquity = balanceUsd ?? 0;
+      const drawdown = computeMaxDrawdown(paper.allMyTrades, startingEquity);
       return NextResponse.json({
         ...paper,
         balanceUsd: balanceUsd ?? undefined,
+        balanceSource,
+        maxDrawdownUsd: drawdown.maxDrawdownUsd,
+        maxDrawdownPct: drawdown.maxDrawdownPct,
         message:
           (paper.message || '') +
-          (balanceUsd != null ? ` · balance $${balanceUsd.toFixed(2)}` : ''),
+          (balanceUsd != null ? ` · paper balance $${balanceUsd.toFixed(2)}` : ''),
         modeSource: mode.source,
       });
     }
@@ -44,9 +58,16 @@ export async function GET(request: Request) {
       wallet,
       balanceUsd,
     });
+    const drawdown = computeMaxDrawdown(
+      live.allMyTrades,
+      balanceUsd ?? 0
+    );
 
     return NextResponse.json({
       ...live,
+      balanceSource,
+      maxDrawdownUsd: drawdown.maxDrawdownUsd,
+      maxDrawdownPct: drawdown.maxDrawdownPct,
       modeSource: mode.source,
       clobReady: mode.clobReady ?? null,
       refreshed: refresh,

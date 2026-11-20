@@ -52,8 +52,8 @@ The normal `COPY_STRATEGY` / safety limits still apply on top of that sized amou
 
 ### Apply to
 
-- **BUY** (default) — only entries need agreement; sells still copy per-trader so you can exit when someone cuts
-- **SELL** — only exits need agreement
+- **BUY** (default) — only buys go through consensus; sells are dropped (not copied)
+- **SELL** — only sells go through consensus; buys are dropped
 - **BOTH** — both sides require consensus
 
 ## How the loop works
