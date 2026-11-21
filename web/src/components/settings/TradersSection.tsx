@@ -57,14 +57,53 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
     return `${address.slice(0, 8)}...${address.slice(-6)}`;
   };
 
+  const handleExport = () => {
+    if (traders.length === 0) return;
+
+    const hasLabels = traders.some((a) => Boolean(getLabel(a)));
+    const body = hasLabels
+      ? [
+          'address,label',
+          ...traders.map((a) => {
+            const label = getLabel(a) || '';
+            const safe = label.includes(',') || label.includes('"')
+              ? `"${label.replace(/"/g, '""')}"`
+              : label;
+            return `${a},${safe}`;
+          }),
+        ].join('\n')
+      : traders.join('\n');
+
+    const blob = new Blob([body + '\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = hasLabels
+      ? `agreebot-traders-${stamp}.csv`
+      : `agreebot-traders-${stamp}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Traders to Copy</CardTitle>
-        <CardDescription>
-          Managed only from this dashboard (stored in MongoDB). Paste one address
-          or a comma-separated list.
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Traders to Copy</CardTitle>
+          <CardDescription>
+            Managed only from this dashboard (stored in MongoDB). Paste one address
+            or a comma-separated list.
+          </CardDescription>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExport}
+          disabled={traders.length === 0}
+        >
+          Export
+        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
