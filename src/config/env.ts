@@ -370,6 +370,15 @@ const parseCopyStrategy = (): CopyStrategyConfig => {
         );
     }
 
+    // Always parse martingale knobs (so Settings can switch without restart gaps)
+    config.martingaleBaseShares = parseFloat(process.env.MARTINGALE_BASE_SHARES || '5');
+    config.martingaleMaxSteps = parseInt(process.env.MARTINGALE_MAX_STEPS || '8', 10);
+    if (strategy === CopyStrategy.MARTINGALE) {
+        console.log(
+            `✓ Martingale sizing: base ${config.martingaleBaseShares} shares, max ${config.martingaleMaxSteps} doubles (ignores trader size)`
+        );
+    }
+
     // Parse tiered multipliers if configured
     if (process.env.TIERED_MULTIPLIERS) {
         try {

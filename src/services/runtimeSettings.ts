@@ -365,6 +365,14 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     if (overrides.KELLY_MAX_FRACTION) {
         ENV.COPY_STRATEGY_CONFIG.kellyMaxFraction = parseFloat(overrides.KELLY_MAX_FRACTION);
     }
+    if (overrides.MARTINGALE_BASE_SHARES) {
+        const n = parseFloat(overrides.MARTINGALE_BASE_SHARES);
+        if (Number.isFinite(n) && n > 0) ENV.COPY_STRATEGY_CONFIG.martingaleBaseShares = n;
+    }
+    if (overrides.MARTINGALE_MAX_STEPS) {
+        const n = parseInt(overrides.MARTINGALE_MAX_STEPS, 10);
+        if (Number.isFinite(n) && n >= 0) ENV.COPY_STRATEGY_CONFIG.martingaleMaxSteps = n;
+    }
     if (overrides.MAX_ORDER_SIZE_USD) {
         ENV.COPY_STRATEGY_CONFIG.maxOrderSizeUSD = parseFloat(overrides.MAX_ORDER_SIZE_USD);
     }

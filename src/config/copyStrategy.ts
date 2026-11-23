@@ -6,6 +6,7 @@
  * - FIXED: Copy a fixed dollar amount per trade
  * - ADAPTIVE: Dynamically adjust percentage based on trader's order size
  * - KELLY: Size from YOUR bankroll using (fractional) Kelly — ignores trader size
+ * - MARTINGALE: Start at N shares (default 5); double shares after each loss; reset after a win
  */
 
 export enum CopyStrategy {
@@ -13,6 +14,7 @@ export enum CopyStrategy {
     FIXED = 'FIXED',
     ADAPTIVE = 'ADAPTIVE',
     KELLY = 'KELLY',
+    MARTINGALE = 'MARTINGALE',
 }
 
 /**
@@ -48,6 +50,10 @@ export interface CopyStrategyConfig {
     kellyEdge?: number; // Assumed edge over market price (e.g. 0.05 = +5pp)
     kellyMaxFraction?: number; // Hard cap on bankroll fraction per bet (default 0.25)
 
+    // Martingale (strategy = MARTINGALE) — ignores trader size; sizes in shares
+    martingaleBaseShares?: number; // First bet of a circle (default 5 = Polymarket min)
+    martingaleMaxSteps?: number; // Cap doubles at base×2^steps (default 8)
+
     // Tiered multipliers (optional - applies to all strategies)
     // If set, multiplier is applied based on trader's order size
     tieredMultipliers?: MultiplierTier[];
@@ -64,8 +70,10 @@ export interface CopyStrategyConfig {
 }
 
 export interface OrderSizeOptions {
-    /** Market price of the outcome token (0–1). Required for KELLY. */
+    /** Market price of the outcome token (0–1). Required for KELLY / MARTINGALE. */
     marketPrice?: number;
+    /** Trailing martingale losses since last win (0 = start of circle). */
+    martingaleLosses?: number;
 }
 
 export interface OrderSizeCalculation {
@@ -150,14 +158,32 @@ export function calculateOrderSize(
             break;
         }
 
+        case CopyStrategy.MARTINGALE: {
+            const price = Math.min(Math.max(options.marketPrice ?? 0.5, 0.01), 0.99);
+            const baseShares = config.martingaleBaseShares ?? 5;
+            const maxSteps = config.martingaleMaxSteps ?? 8;
+            const losses = Math.max(0, Math.floor(options.martingaleLosses ?? 0));
+            const steps = Math.min(losses, maxSteps);
+            const shares = baseShares * Math.pow(2, steps);
+            baseAmount = shares * price;
+            reasoning =
+                `Martingale circle: ${shares} shares (base ${baseShares} × 2^${steps}) ` +
+                `@ $${price.toFixed(3)} → $${baseAmount.toFixed(2)}` +
+                (losses > 0 ? ` · streak ${losses} loss${losses === 1 ? '' : 'es'}` : ' · fresh circle') +
+                (traderOrderSize > 0 ? ` (trader size $${traderOrderSize.toFixed(2)} ignored)` : '');
+            break;
+        }
+
         default:
             throw new Error(`Unknown strategy: ${config.strategy}`);
     }
 
     // Step 1.5: Apply tiered or single multiplier based on trader's order size
-    // (skipped for KELLY — sizing is already bankroll-based)
+    // (skipped for KELLY / MARTINGALE — sizing ignores trader size)
     const multiplier =
-        config.strategy === CopyStrategy.KELLY ? 1.0 : getTradeMultiplier(config, traderOrderSize);
+        config.strategy === CopyStrategy.KELLY || config.strategy === CopyStrategy.MARTINGALE
+            ? 1.0
+            : getTradeMultiplier(config, traderOrderSize);
     let finalAmount = baseAmount * multiplier;
 
     if (multiplier !== 1.0) {
@@ -198,11 +224,11 @@ export function calculateOrderSize(
     }
 
     // Step 5: Check minimum order size
-    // Kelly can size under Polymarket's $1 floor on small bankrolls — raise to min when
-    // there is still edge (finalAmount > 0) and the wallet can afford it.
+    // Kelly / martingale can size under Polymarket's $1 floor — raise to min when affordable.
     if (finalAmount > 0 && finalAmount < config.minOrderSizeUSD) {
         if (
-            config.strategy === CopyStrategy.KELLY &&
+            (config.strategy === CopyStrategy.KELLY ||
+                config.strategy === CopyStrategy.MARTINGALE) &&
             maxAffordable >= config.minOrderSizeUSD
         ) {
             finalAmount = config.minOrderSizeUSD;
@@ -312,6 +338,17 @@ export function validateCopyStrategyConfig(config: CopyStrategyConfig): string[]
         }
         if (edge <= 0 || edge >= 0.5) {
             errors.push('kellyEdge must be between 0 and 0.5 (e.g. 0.05 = +5pp)');
+        }
+    }
+
+    if (config.strategy === CopyStrategy.MARTINGALE) {
+        const base = config.martingaleBaseShares ?? 5;
+        const steps = config.martingaleMaxSteps ?? 8;
+        if (!(base > 0)) {
+            errors.push('martingaleBaseShares must be positive (Polymarket min is usually 5)');
+        }
+        if (!(steps >= 0) || steps > 20) {
+            errors.push('martingaleMaxSteps must be between 0 and 20');
         }
     }
 

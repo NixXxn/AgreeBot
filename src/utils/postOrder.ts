@@ -3,7 +3,11 @@ import { ENV } from '../config/env';
 import { UserActivityInterface, UserPositionInterface } from '../interfaces/User';
 import { getUserActivityModel } from '../models/userHistory';
 import Logger from './logger';
-import { calculateOrderSize, getTradeMultiplier } from '../config/copyStrategy';
+import {
+    calculateOrderSize,
+    CopyStrategy,
+    getTradeMultiplier,
+} from '../config/copyStrategy';
 import {
     applyPaperFill,
     getAllPaperPositions,
@@ -11,6 +15,10 @@ import {
     getPaperPosition,
     hasOpenPaperPosition,
 } from '../services/paperPositions';
+import {
+    getMartingaleConsecutiveLosses,
+    syncMartingaleFromPrices,
+} from '../services/martingaleState';
 import {
     ceilToTick,
     computeHedgeArbPlan,
@@ -150,6 +158,16 @@ export interface PostOrderResult {
 }
 
 const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
+
+const resolveMartingaleLosses = (
+    positions?: Array<{ conditionId?: string; asset?: string; curPrice?: number; size?: number }>
+): number => {
+    if (COPY_STRATEGY_CONFIG.strategy !== CopyStrategy.MARTINGALE) return 0;
+    if (positions?.length) {
+        syncMartingaleFromPrices(positions, ENV.PAPER_MODE);
+    }
+    return getMartingaleConsecutiveLosses(ENV.PAPER_MODE);
+};
 
 const slippageFraction = (): number => {
     const pct = Number(ENV.MAX_SLIPPAGE_PERCENT);
@@ -366,12 +384,19 @@ const postOrder = async (
                   ? my_balance
                   : 10000;
         const paperPos = getPaperPosition(trade.asset);
+        const martingaleLosses = resolveMartingaleLosses(
+            myPositions?.length
+                ? myPositions
+                : my_position
+                  ? [my_position]
+                  : undefined
+        );
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             paperBalance,
             paperPos?.sizeUsd || my_position?.currentValue || 0,
-            { marketPrice: trade.price }
+            { marketPrice: trade.price, martingaleLosses }
         );
 
         let sizeUsd = orderSize.finalAmount;
@@ -590,12 +615,19 @@ const postOrder = async (
         Logger.info(`Trader bought: $${trade.usdcSize.toFixed(2)}`);
 
         const currentPositionValue = my_position ? my_position.size * my_position.avgPrice : 0;
+        const martingaleLosses = resolveMartingaleLosses(
+            myPositions?.length
+                ? myPositions
+                : my_position
+                  ? [my_position]
+                  : undefined
+        );
         const orderCalc = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             my_balance,
             currentPositionValue,
-            { marketPrice: trade.price }
+            { marketPrice: trade.price, martingaleLosses }
         );
         Logger.info(`📊 ${orderCalc.reasoning}`);
         if (orderCalc.finalAmount === 0) {

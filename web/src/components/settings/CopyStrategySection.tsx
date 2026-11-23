@@ -15,6 +15,7 @@ interface CopyStrategySectionProps {
 
 const strategyOptions = [
   { value: 'KELLY', label: 'Half Kelly (bankroll)' },
+  { value: 'MARTINGALE', label: 'Martingale (shares)' },
   { value: 'PERCENTAGE', label: 'Percentage of trader' },
   { value: 'FIXED', label: 'Fixed Amount' },
   { value: 'ADAPTIVE', label: 'Adaptive' },
@@ -22,6 +23,8 @@ const strategyOptions = [
 
 const strategyDescriptions: Record<CopyStrategy, string> = {
   KELLY: 'Size from YOUR budget using fractional Kelly — ignores how big the trader bet',
+  MARTINGALE:
+    'Start each circle at min shares (default 5); double after a loss; reset after a win — ignores trader size',
   PERCENTAGE: "Copy a fixed percentage of trader's order size",
   FIXED: 'Copy a fixed dollar amount per trade',
   ADAPTIVE: 'Dynamically adjust percentage based on trade size',
@@ -35,9 +38,13 @@ export function CopyStrategySection({
 }: CopyStrategySectionProps) {
   const isAdaptive = copyStrategy.strategy === 'ADAPTIVE';
   const isKelly = copyStrategy.strategy === 'KELLY';
+  const isMartingale = copyStrategy.strategy === 'MARTINGALE';
+  const ignoresTraderSize = isKelly || isMartingale;
   const kellyFraction = copyStrategy.kellyFraction ?? 0.5;
   const kellyEdge = copyStrategy.kellyEdge ?? 0.05;
   const kellyMaxFraction = copyStrategy.kellyMaxFraction ?? 0.25;
+  const martingaleBaseShares = copyStrategy.martingaleBaseShares ?? 5;
+  const martingaleMaxSteps = copyStrategy.martingaleMaxSteps ?? 8;
 
   // Example: $10k bankroll, market 0.40, +5pp edge, half Kelly
   const examplePrice = 0.4;
@@ -116,8 +123,47 @@ export function CopyStrategySection({
           </div>
         )}
 
-        {/* Copy Size — not used for Kelly */}
-        {!isKelly && (
+        {/* Martingale settings */}
+        {isMartingale && (
+          <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
+            <h4 className="font-medium text-sm">Martingale Settings</h4>
+            <p className="text-xs text-muted-foreground">
+              Each circle starts at base shares (Polymarket minimum is usually 5). After a resolved
+              loss, the next entry doubles shares; after a win, the circle resets. Leader bet size is
+              ignored. Still capped by Max Order Size.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Base shares (start of circle)"
+                type="number"
+                step="1"
+                min={1}
+                value={martingaleBaseShares}
+                onChange={(e) =>
+                  onCopyStrategyChange({
+                    martingaleBaseShares: Math.max(1, parseFloat(e.target.value) || 5),
+                  })
+                }
+              />
+              <Input
+                label="Max doubles (cap)"
+                type="number"
+                step="1"
+                min={0}
+                max={20}
+                value={martingaleMaxSteps}
+                onChange={(e) =>
+                  onCopyStrategyChange({
+                    martingaleMaxSteps: Math.max(0, parseInt(e.target.value, 10) || 8),
+                  })
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Copy Size — not used for Kelly / Martingale */}
+        {!ignoresTraderSize && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input
               label={copyStrategy.strategy === 'FIXED' ? 'Fixed Amount ($)' : 'Copy Percentage (%)'}
@@ -177,8 +223,8 @@ export function CopyStrategySection({
           </div>
         )}
 
-        {/* Tiered Multipliers — not meaningful for Kelly */}
-        {!isKelly && (
+        {/* Tiered Multipliers — not meaningful for Kelly / Martingale */}
+        {!ignoresTraderSize && (
           <div className="p-4 border rounded-lg space-y-4">
             <h4 className="font-medium text-sm">Tiered Multipliers (Optional)</h4>
             <TieredMultipliersEditor
@@ -196,6 +242,14 @@ export function CopyStrategySection({
               $10k bankroll, market @ {examplePrice.toFixed(2)}, edge +{(kellyEdge * 100).toFixed(0)}
               pp, {kellyFraction}× Kelly → stake ~${exampleStake.toFixed(2)}
               {` (capped at ${(kellyMaxFraction * 100).toFixed(0)}% of bankroll)`}
+            </p>
+          )}
+          {isMartingale && (
+            <p>
+              Fresh circle @ $0.40 → {martingaleBaseShares} shares ≈ $
+              {(martingaleBaseShares * 0.4).toFixed(2)}. After 1 loss →{' '}
+              {martingaleBaseShares * 2} shares ≈ ${(martingaleBaseShares * 2 * 0.4).toFixed(2)}.
+              After a win → back to {martingaleBaseShares} shares.
             </p>
           )}
           {copyStrategy.strategy === 'PERCENTAGE' && (

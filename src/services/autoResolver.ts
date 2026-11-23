@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import { ENV } from '../config/env';
 import { fetchUserPositions } from '../utils/polymarketData';
 import Logger from '../utils/logger';
+import { positionKey, recordMartingaleResult } from './martingaleState';
 
 const PROXY_WALLET = ENV.PROXY_WALLET;
 const PRIVATE_KEY = ENV.PRIVATE_KEY;
@@ -491,6 +492,17 @@ const checkAndResolvePositions = async (clobClient: ClobClient): Promise<void> =
 
         try {
             const result = await resolvePosition(clobClient, position);
+
+            if (result.method === 'sell' || result.method === 'redeem') {
+                if (ENV.COPY_STRATEGY_CONFIG.strategy === 'MARTINGALE') {
+                    const won = position.curPrice >= RESOLVED_HIGH;
+                    recordMartingaleResult(
+                        won,
+                        positionKey(position.conditionId, position.asset),
+                        false
+                    );
+                }
+            }
 
             if (result.method === 'sell') {
                 totalSold += result.tokens;

@@ -1,4 +1,4 @@
-export type CopyStrategy = 'PERCENTAGE' | 'FIXED' | 'ADAPTIVE' | 'KELLY';
+export type CopyStrategy = 'PERCENTAGE' | 'FIXED' | 'ADAPTIVE' | 'KELLY' | 'MARTINGALE';
 
 export interface MultiplierTier {
   min: number;
@@ -19,6 +19,10 @@ export interface BotSettings {
     kellyFraction: number;
     kellyEdge: number;
     kellyMaxFraction: number;
+    /** First bet of a martingale circle (shares). Default 5. */
+    martingaleBaseShares: number;
+    /** Max consecutive doubles before capping share count. */
+    martingaleMaxSteps: number;
   };
 
   // Safety Limits

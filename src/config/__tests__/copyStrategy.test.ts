@@ -386,3 +386,42 @@ describe('calculateOrderSize with tiered multipliers', () => {
     });
 });
 
+describe('MARTINGALE strategy', () => {
+    const martingaleConfig: CopyStrategyConfig = {
+        strategy: CopyStrategy.MARTINGALE,
+        copySize: 10,
+        martingaleBaseShares: 5,
+        martingaleMaxSteps: 8,
+        maxOrderSizeUSD: 5000,
+        minOrderSizeUSD: 1.0,
+    };
+
+    it('starts a fresh circle at base shares × price and ignores trader size', () => {
+        const a = calculateOrderSize(martingaleConfig, 10, 10000, 0, {
+            marketPrice: 0.4,
+            martingaleLosses: 0,
+        });
+        const b = calculateOrderSize(martingaleConfig, 9999, 10000, 0, {
+            marketPrice: 0.4,
+            martingaleLosses: 0,
+        });
+        expect(a.finalAmount).toBeCloseTo(5 * 0.4, 5);
+        expect(b.finalAmount).toBeCloseTo(a.finalAmount, 5);
+        expect(a.reasoning).toMatch(/ignored/i);
+        expect(a.reasoning).toMatch(/fresh circle/i);
+    });
+
+    it('doubles shares after each loss', () => {
+        const loss1 = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
+            marketPrice: 0.5,
+            martingaleLosses: 1,
+        });
+        const loss2 = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
+            marketPrice: 0.5,
+            martingaleLosses: 2,
+        });
+        expect(loss1.finalAmount).toBeCloseTo(10 * 0.5, 5);
+        expect(loss2.finalAmount).toBeCloseTo(20 * 0.5, 5);
+    });
+});
+

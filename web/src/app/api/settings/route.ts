@@ -119,6 +119,8 @@ function envToSettings(env: Record<string, string>): BotSettings {
       kellyFraction: parseFloat(env.KELLY_FRACTION || '0.5'),
       kellyEdge: parseFloat(env.KELLY_EDGE || '0.05'),
       kellyMaxFraction: parseFloat(env.KELLY_MAX_FRACTION || '0.25'),
+      martingaleBaseShares: parseFloat(env.MARTINGALE_BASE_SHARES || '5') || 5,
+      martingaleMaxSteps: parseInt(env.MARTINGALE_MAX_STEPS || '8', 10) || 8,
     },
     safetyLimits: {
       maxOrderSizeUSD: parseFloat(env.MAX_ORDER_SIZE_USD || '100'),
@@ -279,6 +281,12 @@ function settingsToEnvUpdates(update: SettingsUpdate): Record<string, string | n
     if (update.copyStrategy.kellyMaxFraction !== undefined) {
       envUpdates.KELLY_MAX_FRACTION = update.copyStrategy.kellyMaxFraction.toString();
     }
+    if (update.copyStrategy.martingaleBaseShares !== undefined) {
+      envUpdates.MARTINGALE_BASE_SHARES = update.copyStrategy.martingaleBaseShares.toString();
+    }
+    if (update.copyStrategy.martingaleMaxSteps !== undefined) {
+      envUpdates.MARTINGALE_MAX_STEPS = update.copyStrategy.martingaleMaxSteps.toString();
+    }
   }
 
   if (update.safetyLimits) {
@@ -389,6 +397,8 @@ function envFromProcess(): Record<string, string> {
     'KELLY_FRACTION',
     'KELLY_EDGE',
     'KELLY_MAX_FRACTION',
+    'MARTINGALE_BASE_SHARES',
+    'MARTINGALE_MAX_STEPS',
     'MAX_ORDER_SIZE_USD',
     'MIN_ORDER_SIZE_USD',
     'MAX_POSITION_SIZE_USD',
