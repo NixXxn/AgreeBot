@@ -502,7 +502,7 @@ const checkAndResolvePositions = async (clobClient: ClobClient): Promise<void> =
                               0,
                               Number(position.size) > 0 && Number(position.avgPrice) > 0
                                   ? position.size * position.avgPrice
-                                  : Number(position.initialValue) || 0
+                                  : 0
                           );
                     recordMartingaleResult(
                         won,
