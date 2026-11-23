@@ -411,17 +411,39 @@ describe('MARTINGALE strategy', () => {
         expect(a.reasoning).toMatch(/fresh circle/i);
     });
 
-    it('doubles shares after each loss', () => {
-        const loss1 = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
+    it('recovers cumulative loss at the new entry price', () => {
+        // Lost $3 @ 0.60; next @ 0.40 → 10 shares × 0.40 = $4
+        const next = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
+            marketPrice: 0.4,
+            martingaleLosses: 1,
+            martingaleCumulativeLossUsd: 3,
+        });
+        expect(next.finalAmount).toBeCloseTo(4, 5);
+        expect(next.reasoning).toMatch(/recover/i);
+
+        // At even odds, recovering one $2.50 loss ≈ classic double (10 shares × 0.5)
+        const even = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
             marketPrice: 0.5,
             martingaleLosses: 1,
+            martingaleCumulativeLossUsd: 2.5,
         });
-        const loss2 = calculateOrderSize(martingaleConfig, 100, 10000, 0, {
-            marketPrice: 0.5,
-            martingaleLosses: 2,
-        });
-        expect(loss1.finalAmount).toBeCloseTo(10 * 0.5, 5);
-        expect(loss2.finalAmount).toBeCloseTo(20 * 0.5, 5);
+        expect(even.finalAmount).toBeCloseTo(5, 5);
+    });
+
+    it('skips when streak exceeds max recovery steps', () => {
+        const skipped = calculateOrderSize(
+            { ...martingaleConfig, martingaleMaxSteps: 2 },
+            100,
+            10000,
+            0,
+            {
+                marketPrice: 0.5,
+                martingaleLosses: 3,
+                martingaleCumulativeLossUsd: 20,
+            }
+        );
+        expect(skipped.finalAmount).toBe(0);
+        expect(skipped.reasoning).toMatch(/exceeds max/i);
     });
 });
 

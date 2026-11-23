@@ -6,7 +6,7 @@
  * - FIXED: Copy a fixed dollar amount per trade
  * - ADAPTIVE: Dynamically adjust percentage based on trader's order size
  * - KELLY: Size from YOUR bankroll using (fractional) Kelly — ignores trader size
- * - MARTINGALE: Start at N shares (default 5); double shares after each loss; reset after a win
+ * - MARTINGALE: Start at N shares; after losses size so a win recovers lost USD at the new entry price
  */
 
 export enum CopyStrategy {
@@ -50,9 +50,9 @@ export interface CopyStrategyConfig {
     kellyEdge?: number; // Assumed edge over market price (e.g. 0.05 = +5pp)
     kellyMaxFraction?: number; // Hard cap on bankroll fraction per bet (default 0.25)
 
-    // Martingale (strategy = MARTINGALE) — ignores trader size; sizes in shares
+    // Martingale (strategy = MARTINGALE) — ignores trader size; price-adjusted recovery
     martingaleBaseShares?: number; // First bet of a circle (default 5 = Polymarket min)
-    martingaleMaxSteps?: number; // Cap doubles at base×2^steps (default 8)
+    martingaleMaxSteps?: number; // Max trailing losses before skipping (default 8)
 
     // Tiered multipliers (optional - applies to all strategies)
     // If set, multiplier is applied based on trader's order size
@@ -74,6 +74,8 @@ export interface OrderSizeOptions {
     marketPrice?: number;
     /** Trailing martingale losses since last win (0 = start of circle). */
     martingaleLosses?: number;
+    /** Sum of stake USD lost since last win — drives price-adjusted recovery size. */
+    martingaleCumulativeLossUsd?: number;
 }
 
 export interface OrderSizeCalculation {
@@ -163,14 +165,33 @@ export function calculateOrderSize(
             const baseShares = config.martingaleBaseShares ?? 5;
             const maxSteps = config.martingaleMaxSteps ?? 8;
             const losses = Math.max(0, Math.floor(options.martingaleLosses ?? 0));
-            const steps = Math.min(losses, maxSteps);
-            const shares = baseShares * Math.pow(2, steps);
+            const cumulativeLoss = Math.max(0, Number(options.martingaleCumulativeLossUsd) || 0);
+
+            if (losses > maxSteps) {
+                baseAmount = 0;
+                reasoning =
+                    `Martingale: streak ${losses} exceeds max ${maxSteps} recovery steps — skip until a win resets` +
+                    (traderOrderSize > 0
+                        ? ` (trader size $${traderOrderSize.toFixed(2)} ignored)`
+                        : '');
+                break;
+            }
+
+            // shares = L/(1−p) + base  →  win recovers L and nets base×(1−p)
+            const winPerShare = 1 - price;
+            const targetProfit = baseShares * winPerShare;
+            const shares = cumulativeLoss / winPerShare + baseShares;
             baseAmount = shares * price;
             reasoning =
-                `Martingale circle: ${shares} shares (base ${baseShares} × 2^${steps}) ` +
+                `Martingale recovery: ${shares.toFixed(2)} shares ` +
+                `(base ${baseShares} + recover $${cumulativeLoss.toFixed(2)} / ${winPerShare.toFixed(3)}) ` +
                 `@ $${price.toFixed(3)} → $${baseAmount.toFixed(2)}` +
-                (losses > 0 ? ` · streak ${losses} loss${losses === 1 ? '' : 'es'}` : ' · fresh circle') +
-                (traderOrderSize > 0 ? ` (trader size $${traderOrderSize.toFixed(2)} ignored)` : '');
+                (losses > 0
+                    ? ` · streak ${losses} · target +$${targetProfit.toFixed(2)} after recovery`
+                    : ' · fresh circle') +
+                (traderOrderSize > 0
+                    ? ` (trader size $${traderOrderSize.toFixed(2)} ignored)`
+                    : '');
             break;
         }
 

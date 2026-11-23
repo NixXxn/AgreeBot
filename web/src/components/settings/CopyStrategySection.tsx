@@ -15,7 +15,7 @@ interface CopyStrategySectionProps {
 
 const strategyOptions = [
   { value: 'KELLY', label: 'Half Kelly (bankroll)' },
-  { value: 'MARTINGALE', label: 'Martingale (shares)' },
+  { value: 'MARTINGALE', label: 'Martingale (recovery)' },
   { value: 'PERCENTAGE', label: 'Percentage of trader' },
   { value: 'FIXED', label: 'Fixed Amount' },
   { value: 'ADAPTIVE', label: 'Adaptive' },
@@ -24,7 +24,7 @@ const strategyOptions = [
 const strategyDescriptions: Record<CopyStrategy, string> = {
   KELLY: 'Size from YOUR budget using fractional Kelly — ignores how big the trader bet',
   MARTINGALE:
-    'Start each circle at min shares (default 5); double after a loss; reset after a win — ignores trader size',
+    'Start at min shares; after a loss size the next bet so a win recovers lost USD at the new entry price — ignores trader size',
   PERCENTAGE: "Copy a fixed percentage of trader's order size",
   FIXED: 'Copy a fixed dollar amount per trade',
   ADAPTIVE: 'Dynamically adjust percentage based on trade size',
@@ -129,8 +129,9 @@ export function CopyStrategySection({
             <h4 className="font-medium text-sm">Martingale Settings</h4>
             <p className="text-xs text-muted-foreground">
               Each circle starts at base shares (Polymarket minimum is usually 5). After a resolved
-              loss, the next entry doubles shares; after a win, the circle resets. Leader bet size is
-              ignored. Still capped by Max Order Size.
+              loss, the next stake is sized so a win at the new entry price recovers all lost USD
+              and still nets one base profit. After a win, the circle resets. Leader size ignored;
+              still capped by Max Order Size.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
@@ -146,7 +147,7 @@ export function CopyStrategySection({
                 }
               />
               <Input
-                label="Max doubles (cap)"
+                label="Max recovery steps"
                 type="number"
                 step="1"
                 min={0}
@@ -244,14 +245,20 @@ export function CopyStrategySection({
               {` (capped at ${(kellyMaxFraction * 100).toFixed(0)}% of bankroll)`}
             </p>
           )}
-          {isMartingale && (
-            <p>
-              Fresh circle @ $0.40 → {martingaleBaseShares} shares ≈ $
-              {(martingaleBaseShares * 0.4).toFixed(2)}. After 1 loss →{' '}
-              {martingaleBaseShares * 2} shares ≈ ${(martingaleBaseShares * 2 * 0.4).toFixed(2)}.
-              After a win → back to {martingaleBaseShares} shares.
-            </p>
-          )}
+          {isMartingale && (() => {
+            const lossStake = martingaleBaseShares * 0.6;
+            const nextPrice = 0.4;
+            const recoverShares = lossStake / (1 - nextPrice) + martingaleBaseShares;
+            const recoverStake = recoverShares * nextPrice;
+            return (
+              <p>
+                Fresh @ $0.60 → {martingaleBaseShares} shares ≈ ${lossStake.toFixed(2)}. Lose that,
+                next @ ${nextPrice.toFixed(2)} → {recoverShares.toFixed(1)} shares ≈ $
+                {recoverStake.toFixed(2)} (recovers ${lossStake.toFixed(2)} + nets{' '}
+                {(martingaleBaseShares * (1 - nextPrice)).toFixed(2)}). Win → reset.
+              </p>
+            );
+          })()}
           {copyStrategy.strategy === 'PERCENTAGE' && (
             <p>
               Trader buys $100 → You buy $

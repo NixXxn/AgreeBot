@@ -7,7 +7,7 @@ import {
     getOpenPaperPositionCount,
     loadPaperPositionsFromDb,
 } from './paperPositions';
-import { getMartingaleConsecutiveLosses } from './martingaleState';
+import { getMartingaleCircle } from './martingaleState';
 
 let server: http.Server | null = null;
 let startedAt = Date.now();
@@ -43,7 +43,7 @@ export const startHealthServer = (): void => {
                 martingale: {
                     baseShares: ENV.COPY_STRATEGY_CONFIG.martingaleBaseShares ?? 5,
                     maxSteps: ENV.COPY_STRATEGY_CONFIG.martingaleMaxSteps ?? 8,
-                    consecutiveLosses: getMartingaleConsecutiveLosses(ENV.PAPER_MODE),
+                    ...getMartingaleCircle(ENV.PAPER_MODE),
                 },
                 consensus: {
                     enabled: ENV.CONSENSUS_ENABLED,
@@ -160,7 +160,7 @@ export const startHealthServer = (): void => {
                     martingale: {
                         baseShares: ENV.COPY_STRATEGY_CONFIG.martingaleBaseShares ?? 5,
                         maxSteps: ENV.COPY_STRATEGY_CONFIG.martingaleMaxSteps ?? 8,
-                        consecutiveLosses: getMartingaleConsecutiveLosses(ENV.PAPER_MODE),
+                        ...getMartingaleCircle(ENV.PAPER_MODE),
                     },
                     consensus: {
                         enabled: ENV.CONSENSUS_ENABLED,

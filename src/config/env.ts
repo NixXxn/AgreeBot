@@ -375,7 +375,7 @@ const parseCopyStrategy = (): CopyStrategyConfig => {
     config.martingaleMaxSteps = parseInt(process.env.MARTINGALE_MAX_STEPS || '8', 10);
     if (strategy === CopyStrategy.MARTINGALE) {
         console.log(
-            `✓ Martingale sizing: base ${config.martingaleBaseShares} shares, max ${config.martingaleMaxSteps} doubles (ignores trader size)`
+            `✓ Martingale recovery sizing: base ${config.martingaleBaseShares} shares, max ${config.martingaleMaxSteps} steps (price-adjusted; ignores trader size)`
         );
     }
 

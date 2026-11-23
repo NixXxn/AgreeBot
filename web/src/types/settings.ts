@@ -21,7 +21,7 @@ export interface BotSettings {
     kellyMaxFraction: number;
     /** First bet of a martingale circle (shares). Default 5. */
     martingaleBaseShares: number;
-    /** Max consecutive doubles before capping share count. */
+    /** Max trailing losses before skipping until a win resets. */
     martingaleMaxSteps: number;
   };
 

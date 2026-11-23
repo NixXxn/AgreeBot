@@ -496,10 +496,19 @@ const checkAndResolvePositions = async (clobClient: ClobClient): Promise<void> =
             if (result.method === 'sell' || result.method === 'redeem') {
                 if (ENV.COPY_STRATEGY_CONFIG.strategy === 'MARTINGALE') {
                     const won = position.curPrice >= RESOLVED_HIGH;
+                    const lostUsd = won
+                        ? 0
+                        : Math.max(
+                              0,
+                              Number(position.size) > 0 && Number(position.avgPrice) > 0
+                                  ? position.size * position.avgPrice
+                                  : Number(position.initialValue) || 0
+                          );
                     recordMartingaleResult(
                         won,
                         positionKey(position.conditionId, position.asset),
-                        false
+                        false,
+                        lostUsd
                     );
                 }
             }

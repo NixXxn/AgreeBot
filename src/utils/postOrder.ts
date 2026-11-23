@@ -16,7 +16,8 @@ import {
     hasOpenPaperPosition,
 } from '../services/paperPositions';
 import {
-    getMartingaleConsecutiveLosses,
+    getMartingaleCircle,
+    MartingaleCircle,
     syncMartingaleFromPrices,
 } from '../services/martingaleState';
 import { syncPaperMartingaleFromLedger } from '../services/paperMartingaleSync';
@@ -160,18 +161,27 @@ export interface PostOrderResult {
 
 const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
 
-const resolveMartingaleLosses = async (
-    positions?: Array<{ conditionId?: string; asset?: string; curPrice?: number; size?: number }>
-): Promise<number> => {
-    if (COPY_STRATEGY_CONFIG.strategy !== CopyStrategy.MARTINGALE) return 0;
-    // Paper: rebuild streak from bot_signals + CLOB marks (never live wallet positions)
+const resolveMartingaleCircle = async (
+    positions?: Array<{
+        conditionId?: string;
+        asset?: string;
+        curPrice?: number;
+        size?: number;
+        avgPrice?: number;
+        sizeUsd?: number;
+    }>
+): Promise<MartingaleCircle> => {
+    if (COPY_STRATEGY_CONFIG.strategy !== CopyStrategy.MARTINGALE) {
+        return { consecutiveLosses: 0, cumulativeLossUsd: 0 };
+    }
+    // Paper: rebuild streak + lost USD from bot_signals + CLOB marks (never live wallet)
     if (ENV.PAPER_MODE) {
         return syncPaperMartingaleFromLedger();
     }
     if (positions?.length) {
-        syncMartingaleFromPrices(positions, false);
+        return syncMartingaleFromPrices(positions, false);
     }
-    return getMartingaleConsecutiveLosses(false);
+    return getMartingaleCircle(false);
 };
 
 const slippageFraction = (): number => {
@@ -389,13 +399,17 @@ const postOrder = async (
                   ? my_balance
                   : 10000;
         const paperPos = getPaperPosition(trade.asset);
-        const martingaleLosses = await resolveMartingaleLosses();
+        const martingaleCircle = await resolveMartingaleCircle();
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
             paperBalance,
             paperPos?.sizeUsd || my_position?.currentValue || 0,
-            { marketPrice: trade.price, martingaleLosses }
+            {
+                marketPrice: trade.price,
+                martingaleLosses: martingaleCircle.consecutiveLosses,
+                martingaleCumulativeLossUsd: martingaleCircle.cumulativeLossUsd,
+            }
         );
 
         let sizeUsd = orderSize.finalAmount;
@@ -614,7 +628,7 @@ const postOrder = async (
         Logger.info(`Trader bought: $${trade.usdcSize.toFixed(2)}`);
 
         const currentPositionValue = my_position ? my_position.size * my_position.avgPrice : 0;
-        const martingaleLosses = await resolveMartingaleLosses(
+        const martingaleCircle = await resolveMartingaleCircle(
             myPositions?.length
                 ? myPositions
                 : my_position
@@ -626,7 +640,11 @@ const postOrder = async (
             trade.usdcSize,
             my_balance,
             currentPositionValue,
-            { marketPrice: trade.price, martingaleLosses }
+            {
+                marketPrice: trade.price,
+                martingaleLosses: martingaleCircle.consecutiveLosses,
+                martingaleCumulativeLossUsd: martingaleCircle.cumulativeLossUsd,
+            }
         );
         Logger.info(`📊 ${orderCalc.reasoning}`);
         if (orderCalc.finalAmount === 0) {

@@ -1,10 +1,11 @@
 /**
- * Paper-mode martingale: rebuild the loss streak from bot_signals + CLOB marks.
+ * Paper-mode martingale: rebuild the recovery circle from bot_signals + CLOB marks.
  * Auto-resolver is live-only, and live wallet positions must not drive the paper circle.
  */
 import { BotSignal } from '../models/botSignal';
 import {
-    getMartingaleConsecutiveLosses,
+    getMartingaleCircle,
+    MartingaleCircle,
     positionKey,
     rebuildMartingaleFromResolvedMarks,
 } from './martingaleState';
@@ -15,7 +16,7 @@ const SYNC_MIN_MS = 12_000;
 const FETCH_CONCURRENCY = 8;
 
 let lastSyncAt = 0;
-let inFlight: Promise<number> | null = null;
+let inFlight: Promise<MartingaleCircle> | null = null;
 
 const fetchMarkPrice = async (tokenId: string): Promise<number | null> => {
     if (!tokenId) return null;
@@ -62,13 +63,13 @@ const mapPool = async <T, R>(
 };
 
 /**
- * Rebuild paper consecutive-loss streak from resolved paper ledger entries.
+ * Rebuild paper consecutive-loss streak + cumulative lost USD from resolved ledger entries.
  * Throttled so consensus bursts don't hammer the CLOB.
  */
-export const syncPaperMartingaleFromLedger = async (): Promise<number> => {
+export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleCircle> => {
     const now = Date.now();
     if (now - lastSyncAt < SYNC_MIN_MS && !inFlight) {
-        return getMartingaleConsecutiveLosses(true);
+        return getMartingaleCircle(true);
     }
     if (inFlight) return inFlight;
 
@@ -80,24 +81,35 @@ export const syncPaperMartingaleFromLedger = async (): Promise<number> => {
                 side: { $in: ['BUY', 'buy'] },
             })
                 .sort({ createdAt: 1 })
-                .select({ conditionId: 1, asset: 1, createdAt: 1 })
+                .select({ conditionId: 1, asset: 1, createdAt: 1, sizeUsd: 1 })
                 .lean()
                 .exec();
 
-            const unique: Array<{ conditionId: string; asset: string; key: string }> = [];
+            const unique: Array<{
+                conditionId: string;
+                asset: string;
+                key: string;
+                sizeUsd: number;
+            }> = [];
             const seen = new Set<string>();
             for (const s of signals) {
                 const conditionId = String(s.conditionId || '');
                 const asset = String(s.asset || '');
                 if (!conditionId || !asset) continue;
                 const key = positionKey(conditionId, asset);
-                if (seen.has(key)) continue;
+                const sizeUsd = Math.max(0, Number(s.sizeUsd) || 0);
+                if (seen.has(key)) {
+                    // Multiple BUYs on same asset — accumulate cost for recovery
+                    const existing = unique.find((u) => u.key === key);
+                    if (existing) existing.sizeUsd += sizeUsd;
+                    continue;
+                }
                 seen.add(key);
-                unique.push({ conditionId, asset, key });
+                unique.push({ conditionId, asset, key, sizeUsd });
             }
 
             if (unique.length === 0) {
-                return getMartingaleConsecutiveLosses(true);
+                return getMartingaleCircle(true);
             }
 
             const prices = await mapPool(unique, FETCH_CONCURRENCY, (row) =>
@@ -108,6 +120,7 @@ export const syncPaperMartingaleFromLedger = async (): Promise<number> => {
                 conditionId: string;
                 asset: string;
                 curPrice: number;
+                sizeUsd: number;
             }> = [];
             let openCount = 0;
             for (let i = 0; i < unique.length; i++) {
@@ -124,23 +137,25 @@ export const syncPaperMartingaleFromLedger = async (): Promise<number> => {
                     conditionId: unique[i].conditionId,
                     asset: unique[i].asset,
                     curPrice: price,
+                    sizeUsd: unique[i].sizeUsd,
                 });
             }
 
-            const streak = rebuildMartingaleFromResolvedMarks(resolvedRows, true);
+            const circle = rebuildMartingaleFromResolvedMarks(resolvedRows, true);
             console.log(
-                `🎲 Paper martingale rebuild: streak=${streak} ` +
+                `🎲 Paper martingale rebuild: streak=${circle.consecutiveLosses} ` +
+                    `recover=$${circle.cumulativeLossUsd.toFixed(2)} ` +
                     `(resolved ${resolvedRows.length}, open/unknown ${openCount})`
             );
             lastSyncAt = Date.now();
-            return streak;
+            return circle;
         } catch (error) {
             console.warn(
                 `Paper martingale sync failed: ${
                     error instanceof Error ? error.message : String(error)
                 }`
             );
-            return getMartingaleConsecutiveLosses(true);
+            return getMartingaleCircle(true);
         } finally {
             inFlight = null;
         }
