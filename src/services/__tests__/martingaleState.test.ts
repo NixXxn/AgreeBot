@@ -4,9 +4,11 @@ import {
     getMartingaleConsecutiveLosses,
     martingaleSharesForStreak,
     positionKey,
+    rebuildMartingaleFromResolvedMarks,
     recordMartingaleResult,
     resetMartingaleState,
     syncMartingaleFromPrices,
+    trailingLossStreak,
 } from '../martingaleState';
 
 const STATE_PATH = path.join(process.cwd(), 'trader_reports', 'martingale_state.json');
@@ -59,5 +61,30 @@ describe('martingaleState', () => {
             true
         );
         expect(getMartingaleConsecutiveLosses(true)).toBe(0);
+    });
+
+    it('computes trailing loss streak from chronological outcomes', () => {
+        expect(trailingLossStreak([])).toBe(0);
+        expect(trailingLossStreak([{ won: true }])).toBe(0);
+        expect(trailingLossStreak([{ won: false }, { won: false }])).toBe(2);
+        expect(
+            trailingLossStreak([{ won: false }, { won: true }, { won: false }, { won: false }])
+        ).toBe(2);
+    });
+
+    it('rebuilds paper streak from resolved marks (ignores open)', () => {
+        // L, W, L, L → streak 2; open mid-price omitted
+        const streak = rebuildMartingaleFromResolvedMarks(
+            [
+                { conditionId: 'c1', asset: 'a1', curPrice: 0.0 },
+                { conditionId: 'c2', asset: 'a2', curPrice: 1.0 },
+                { conditionId: 'c3', asset: 'a3', curPrice: 0.5 }, // open — ignored
+                { conditionId: 'c4', asset: 'a4', curPrice: 0.0 },
+                { conditionId: 'c5', asset: 'a5', curPrice: 0.01 },
+            ],
+            true
+        );
+        expect(streak).toBe(2);
+        expect(getMartingaleConsecutiveLosses(true)).toBe(2);
     });
 });

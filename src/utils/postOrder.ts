@@ -19,6 +19,7 @@ import {
     getMartingaleConsecutiveLosses,
     syncMartingaleFromPrices,
 } from '../services/martingaleState';
+import { syncPaperMartingaleFromLedger } from '../services/paperMartingaleSync';
 import {
     ceilToTick,
     computeHedgeArbPlan,
@@ -159,14 +160,18 @@ export interface PostOrderResult {
 
 const liveSkip = (): PostOrderResult => ({ executed: false, sizeUsd: 0, paper: false });
 
-const resolveMartingaleLosses = (
+const resolveMartingaleLosses = async (
     positions?: Array<{ conditionId?: string; asset?: string; curPrice?: number; size?: number }>
-): number => {
+): Promise<number> => {
     if (COPY_STRATEGY_CONFIG.strategy !== CopyStrategy.MARTINGALE) return 0;
-    if (positions?.length) {
-        syncMartingaleFromPrices(positions, ENV.PAPER_MODE);
+    // Paper: rebuild streak from bot_signals + CLOB marks (never live wallet positions)
+    if (ENV.PAPER_MODE) {
+        return syncPaperMartingaleFromLedger();
     }
-    return getMartingaleConsecutiveLosses(ENV.PAPER_MODE);
+    if (positions?.length) {
+        syncMartingaleFromPrices(positions, false);
+    }
+    return getMartingaleConsecutiveLosses(false);
 };
 
 const slippageFraction = (): number => {
@@ -384,13 +389,7 @@ const postOrder = async (
                   ? my_balance
                   : 10000;
         const paperPos = getPaperPosition(trade.asset);
-        const martingaleLosses = resolveMartingaleLosses(
-            myPositions?.length
-                ? myPositions
-                : my_position
-                  ? [my_position]
-                  : undefined
-        );
+        const martingaleLosses = await resolveMartingaleLosses();
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
@@ -615,7 +614,7 @@ const postOrder = async (
         Logger.info(`Trader bought: $${trade.usdcSize.toFixed(2)}`);
 
         const currentPositionValue = my_position ? my_position.size * my_position.avgPrice : 0;
-        const martingaleLosses = resolveMartingaleLosses(
+        const martingaleLosses = await resolveMartingaleLosses(
             myPositions?.length
                 ? myPositions
                 : my_position

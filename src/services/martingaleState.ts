@@ -171,3 +171,66 @@ export const syncMartingaleFromPrices = (
     }
     return getMartingaleConsecutiveLosses(paper);
 };
+
+/**
+ * Trailing consecutive losses from a chronological list of resolved outcomes
+ * (walk newest → oldest until a win). Open/unresolved rows must be omitted.
+ */
+export const trailingLossStreak = (outcomesOldestFirst: Array<{ won: boolean }>): number => {
+    let streak = 0;
+    for (let i = outcomesOldestFirst.length - 1; i >= 0; i--) {
+        if (outcomesOldestFirst[i].won) break;
+        streak++;
+    }
+    return streak;
+};
+
+/** Overwrite streak (used when rebuilding paper circle from the ledger). */
+export const setMartingaleStreak = (
+    consecutiveLosses: number,
+    processedKeys: string[],
+    paper = ENV.PAPER_MODE
+): void => {
+    saveSlot(paper, {
+        consecutiveLosses: Math.max(0, Math.floor(consecutiveLosses)),
+        processedKeys: processedKeys.map((k) => k.toLowerCase()).slice(-MAX_PROCESSED),
+        updatedAt: Math.floor(Date.now() / 1000),
+    });
+};
+
+const isResolvedWin = (price: number): boolean => price >= RESOLVED_HIGH;
+const isResolvedLoss = (price: number): boolean => price <= RESOLVED_LOW;
+
+/**
+ * Rebuild paper martingale streak from entered paper BUY signals + mark prices.
+ * Ignores still-open markets; streak = trailing losses after the last resolved win.
+ */
+export const rebuildMartingaleFromResolvedMarks = (
+    rowsOldestFirst: Array<{ conditionId: string; asset: string; curPrice: number }>,
+    paper = true
+): number => {
+    const outcomes: Array<{ won: boolean; key: string }> = [];
+    const seen = new Set<string>();
+
+    for (const row of rowsOldestFirst) {
+        const key = positionKey(row.conditionId, row.asset);
+        if (!row.conditionId || !row.asset || seen.has(key)) continue;
+        const price = Number(row.curPrice);
+        if (!Number.isFinite(price)) continue;
+        if (isResolvedWin(price)) {
+            seen.add(key);
+            outcomes.push({ won: true, key });
+        } else if (isResolvedLoss(price)) {
+            seen.add(key);
+            outcomes.push({ won: false, key });
+        }
+    }
+
+    const streak = trailingLossStreak(outcomes);
+    setMartingaleStreak(
+        streak,
+        outcomes.map((o) => o.key),
+        paper
+    );
+    return streak;
+};

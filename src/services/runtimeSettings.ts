@@ -346,8 +346,12 @@ export const applyRuntimeOverrides = async (): Promise<void> => {
     }
     // Keep strategy / safety config in sync when dashboard changes settings
     if (overrides.COPY_STRATEGY) {
-        ENV.COPY_STRATEGY_CONFIG.strategy =
-            overrides.COPY_STRATEGY.toUpperCase() as typeof ENV.COPY_STRATEGY_CONFIG.strategy;
+        const next = overrides.COPY_STRATEGY.toUpperCase() as typeof ENV.COPY_STRATEGY_CONFIG.strategy;
+        const prev = ENV.COPY_STRATEGY_CONFIG.strategy;
+        ENV.COPY_STRATEGY_CONFIG.strategy = next;
+        if (prev !== next) {
+            Logger.success(`Copy strategy → ${next} (was ${prev})`);
+        }
     }
     if (overrides.COPY_SIZE) {
         ENV.COPY_STRATEGY_CONFIG.copySize = parseFloat(overrides.COPY_SIZE);

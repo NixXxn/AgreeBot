@@ -545,7 +545,13 @@ const autoResolver = async () => {
         try {
             const { ENV } = await import('../config/env');
             if (ENV.PAPER_MODE) {
-                // Live-only; wait until mode flips
+                // No on-chain redeem in paper — still refresh martingale streak from ledger marks
+                if (ENV.COPY_STRATEGY_CONFIG.strategy === 'MARTINGALE') {
+                    const { syncPaperMartingaleFromLedger } = await import(
+                        './paperMartingaleSync'
+                    );
+                    await syncPaperMartingaleFromLedger();
+                }
             } else {
                 const { ensureClobClient } = await import('./clobClientHolder');
                 const clobClient = await ensureClobClient();

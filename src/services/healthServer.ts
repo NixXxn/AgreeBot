@@ -7,6 +7,7 @@ import {
     getOpenPaperPositionCount,
     loadPaperPositionsFromDb,
 } from './paperPositions';
+import { getMartingaleConsecutiveLosses } from './martingaleState';
 
 let server: http.Server | null = null;
 let startedAt = Date.now();
@@ -37,6 +38,13 @@ export const startHealthServer = (): void => {
                 uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
                 traders: ENV.USER_ADDRESSES.length,
                 paperOpenPositions: getOpenPaperPositionCount(),
+                copyStrategy: ENV.COPY_STRATEGY_CONFIG.strategy,
+                maxOrderSizeUSD: ENV.COPY_STRATEGY_CONFIG.maxOrderSizeUSD,
+                martingale: {
+                    baseShares: ENV.COPY_STRATEGY_CONFIG.martingaleBaseShares ?? 5,
+                    maxSteps: ENV.COPY_STRATEGY_CONFIG.martingaleMaxSteps ?? 8,
+                    consecutiveLosses: getMartingaleConsecutiveLosses(ENV.PAPER_MODE),
+                },
                 consensus: {
                     enabled: ENV.CONSENSUS_ENABLED,
                     minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
@@ -142,11 +150,18 @@ export const startHealthServer = (): void => {
                     gravia = await syncGraviaSubscription(ENV.USER_ADDRESSES);
                 }
                 Logger.success(
-                    `Runtime settings reloaded (minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length}, paper=${ENV.PAPER_MODE}, clob=${!!getClobClient()})`
+                    `Runtime settings reloaded (strategy=${ENV.COPY_STRATEGY_CONFIG.strategy}, minAgreement=${ENV.CONSENSUS_MIN_AGREEMENT}, traders=${ENV.USER_ADDRESSES.length}, paper=${ENV.PAPER_MODE}, clob=${!!getClobClient()})`
                 );
                 json(res, 200, {
                     ok: true,
                     traders: ENV.USER_ADDRESSES.length,
+                    copyStrategy: ENV.COPY_STRATEGY_CONFIG.strategy,
+                    maxOrderSizeUSD: ENV.COPY_STRATEGY_CONFIG.maxOrderSizeUSD,
+                    martingale: {
+                        baseShares: ENV.COPY_STRATEGY_CONFIG.martingaleBaseShares ?? 5,
+                        maxSteps: ENV.COPY_STRATEGY_CONFIG.martingaleMaxSteps ?? 8,
+                        consecutiveLosses: getMartingaleConsecutiveLosses(ENV.PAPER_MODE),
+                    },
                     consensus: {
                         enabled: ENV.CONSENSUS_ENABLED,
                         minAgreement: ENV.CONSENSUS_MIN_AGREEMENT,
