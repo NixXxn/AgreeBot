@@ -1,3 +1,4 @@
+import WebSocket from 'ws';
 import { PIPELINE } from './config';
 import { getCurrentCryptoMarket, type CurrentMarket } from './graviaClient';
 import { CandidateTrader } from './models';
@@ -22,6 +23,8 @@ export type DiscoveryStats = {
 /**
  * Live Gravia transaction stream filtered to current crypto 5m condition IDs.
  * Discovery only — never blocks the copy-trading bot process.
+ *
+ * Uses the `ws` package (Node 20 Alpine has no global WebSocket).
  */
 export class DiscoveryStream {
     private ws: WebSocket | null = null;
@@ -61,6 +64,7 @@ export class DiscoveryStream {
         this.stopped = true;
         if (this.marketRefreshTimer) clearInterval(this.marketRefreshTimer);
         if (this.flushTimer) clearInterval(this.flushTimer);
+        this.ws?.removeAllListeners();
         this.ws?.close();
         this.ws = null;
         this.stats.connected = false;
@@ -74,7 +78,9 @@ export class DiscoveryStream {
     private connect(): void {
         if (this.stopped) return;
 
-        const url = new URL(`${PIPELINE.GRAVIA_BASE.replace('https://', 'wss://')}/api/v1/streams/transactions`);
+        const url = new URL(
+            `${PIPELINE.GRAVIA_BASE.replace('https://', 'wss://')}/api/v1/streams/transactions`
+        );
         url.searchParams.set('streams', 'trades');
         url.searchParams.set('mempool', 'false');
         url.searchParams.set('api_key', PIPELINE.GRAVIA_API);
@@ -82,23 +88,23 @@ export class DiscoveryStream {
         const ws = new WebSocket(url.toString());
         this.ws = ws;
 
-        ws.addEventListener('open', () => {
+        ws.on('open', () => {
             this.stats.connected = true;
             this.reconnectAttempt = 0;
             this.applyMarketFilter();
             console.log('[pipeline] discovery WS connected');
         });
 
-        ws.addEventListener('message', (event) => {
+        ws.on('message', (data) => {
             try {
-                const raw = typeof event.data === 'string' ? event.data : String(event.data);
+                const raw = typeof data === 'string' ? data : data.toString('utf8');
                 this.onMessage(JSON.parse(raw));
             } catch {
                 /* ignore malformed frames */
             }
         });
 
-        ws.addEventListener('close', () => {
+        ws.on('close', () => {
             this.stats.connected = false;
             this.ws = null;
             if (this.stopped) return;
@@ -108,7 +114,7 @@ export class DiscoveryStream {
             setTimeout(() => this.connect(), delay);
         });
 
-        ws.addEventListener('error', () => {
+        ws.on('error', () => {
             this.stats.lastError = 'websocket_error';
         });
     }
@@ -157,8 +163,7 @@ export class DiscoveryStream {
     }
 
     private applyMarketFilter(): void {
-        // WebSocket.OPEN === 1 (Node / WHATWG)
-        if (!this.ws || this.ws.readyState !== 1) return;
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         const markets = [...this.markets.keys()];
         // Clear then set so rotated markets drop out of the filter.
         this.ws.send(JSON.stringify({ action: 'filter.clear', target: 'markets' }));
