@@ -22,6 +22,18 @@ Coolify can run this bot from the included `Dockerfile`. MongoDB Atlas is the si
 
 Coolify builds the bot **and** the Next.js dashboard. The public URL is the dashboard; the bot runs in the same container (internal health on `:3001`).
 
+### Recommended: Docker Compose (bot + mongodb + pipeline)
+
+For the crypto 5m trader list without a second Coolify app, deploy this repo as **Docker Compose**:
+
+1. Build pack / compose file: `docker-compose.yml`
+2. Services started: `bot`, `mongodb`, `pipeline` (same `bot-network`)
+3. Public port: **3000** (`bot` dashboard)
+4. Pipeline health (optional): **3002** `/health`
+5. Env: same as below; compose defaults `MONGO_URI=mongodb://mongodb:27017/polymarket_copytrading` and `BOT_RELOAD_URL=http://bot:3001/runtime/reload`
+
+Details: [TRADER_PIPELINE.md](./TRADER_PIPELINE.md).
+
 ## 2. Environment variables
 
 In the Coolify app → **Environment Variables**, set at least:
@@ -96,12 +108,14 @@ Use the internal hostname Coolify assigns to that resource.
 
 ```bash
 cp .env.example .env
-# edit .env — for compose MongoDB use:
-# MONGO_URI=mongodb://mongodb:27017/polymarket_copytrading
+# edit .env — set GRAVIA_API; compose supplies MONGO_URI to mongodb by default
 
 docker compose up -d --build
+# starts: bot + mongodb + pipeline
+
 curl http://localhost:3000/health
-docker compose logs -f bot
+curl http://localhost:3002/health
+docker compose logs -f bot pipeline
 ```
 
 ## Gravia trade webhooks (optional, recommended)

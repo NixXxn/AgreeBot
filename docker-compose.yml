@@ -1,4 +1,12 @@
-version: '3.8'
+# AgreeBot stack — three services on one network:
+#   bot       → copy-trading + dashboard (port 3000)
+#   mongodb   → shared trader / activity DB
+#   pipeline  → crypto 5m trader discovery (port 3002, own process)
+#
+# Start everything:
+#   docker compose up -d --build
+#
+# Pipeline never shares the bot event loop; it only talks Mongo (+ optional reload HTTP).
 
 services:
     bot:
@@ -10,11 +18,14 @@ services:
         env_file:
             - .env
         environment:
-            # When using the bundled MongoDB service, point MONGO_URI here
-            # (override in .env if you use Atlas instead)
+            AGREEBOT_ROLE: bot
+            # Bundled Mongo by default; override with Atlas in .env if you prefer
+            MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/polymarket_copytrading}
+            # Public dashboard port (entrypoint keeps bot health on :3001 internally)
+            PORT: ${PORT:-3000}
             HEALTH_PORT: ${HEALTH_PORT:-3000}
         ports:
-            - '${HEALTH_PORT:-3000}:3000'
+            - '${PORT:-3000}:3000'
         depends_on:
             mongodb:
                 condition: service_healthy
@@ -45,6 +56,39 @@ services:
             interval: 10s
             timeout: 5s
             retries: 5
+
+    # Crypto 5m trader list — same image, AGREEBOT_ROLE=pipeline, same Mongo network
+    pipeline:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: agreebot-pipeline
+        restart: unless-stopped
+        env_file:
+            - .env
+        environment:
+            AGREEBOT_ROLE: pipeline
+            MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/polymarket_copytrading}
+            PIPELINE_HEALTH_PORT: ${PIPELINE_HEALTH_PORT:-3002}
+            # Same Docker network → bot hostname + internal health port
+            BOT_RELOAD_URL: http://bot:3001/runtime/reload
+            TRADER_PIPELINE_ENABLED: ${TRADER_PIPELINE_ENABLED:-true}
+            TRADER_PIPELINE_AUTO_APPLY: ${TRADER_PIPELINE_AUTO_APPLY:-true}
+        ports:
+            - '${PIPELINE_HEALTH_PORT:-3002}:3002'
+        depends_on:
+            mongodb:
+                condition: service_healthy
+            bot:
+                condition: service_started
+        networks:
+            - bot-network
+        healthcheck:
+            test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3002/health']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
 
 networks:
     bot-network:

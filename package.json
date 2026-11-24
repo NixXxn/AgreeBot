@@ -6,6 +6,8 @@
     "scripts": {
         "build": "tsc",
         "start": "node dist/index.js",
+        "pipeline": "ts-node src/pipeline/index.ts",
+        "pipeline:start": "node dist/pipeline/index.js",
         "dev": "ts-node src/index.ts",
         "check-allowance": "ts-node src/scripts/checkAllowance.ts",
         "verify-allowance": "ts-node src/scripts/verifyAllowance.ts",

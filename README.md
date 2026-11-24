@@ -137,13 +137,13 @@ npm run web     # Optional web UI
 
 ```bash
 cp .env.example .env
-# edit .env — for local compose MongoDB:
-# MONGO_URI=mongodb://mongodb:27017/polymarket_copytrading
-docker compose up -d --build
+# edit .env — set GRAVIA_API; compose defaults MONGO_URI → mongodb service
+docker compose up -d --build   # bot + mongodb + pipeline
 curl http://localhost:3000/health
+curl http://localhost:3002/health
 ```
 
-📖 **[Coolify Guide →](./docs/COOLIFY.md)** · **[Consensus Guide →](./docs/CONSENSUS_GUIDE.md)** · **[Docker Guide →](./docs/DOCKER.md)**
+📖 **[Coolify Guide →](./docs/COOLIFY.md)** · **[Trader pipeline →](./docs/TRADER_PIPELINE.md)** · **[Consensus Guide →](./docs/CONSENSUS_GUIDE.md)** · **[Docker Guide →](./docs/DOCKER.md)**
 
 ---
 

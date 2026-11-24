@@ -129,6 +129,19 @@ ENV_FILE="/app/.env"
 
 export HOSTNAME="0.0.0.0"
 
+# AGREEBOT_ROLE=pipeline → crypto-trader discovery worker only (no bot / dashboard).
+# Default (bot) keeps the copy-trading process on its own event loop.
+ROLE="$(strip_q "${AGREEBOT_ROLE:-bot}")"
+case "$ROLE" in
+  pipeline|trader-pipeline)
+    PIPELINE_PORT="$(strip_q "${PIPELINE_HEALTH_PORT:-3002}")"
+    export PIPELINE_HEALTH_PORT="$PIPELINE_PORT"
+    export HEALTH_PORT="$PIPELINE_PORT"
+    echo "Starting trader-pipeline only (health :${PIPELINE_PORT})..."
+    exec node /app/dist/pipeline/index.js
+    ;;
+esac
+
 echo "Starting AgreeBot (health :${BOT_HEALTH_PORT}) + dashboard (:${WEB_PORT})..."
 
 node /app/dist/index.js &
