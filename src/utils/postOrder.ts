@@ -18,6 +18,7 @@ import {
 import { getMartingaleCircle, syncMartingaleFromPrices } from '../services/martingaleState';
 import {
     MartingaleSyncResult,
+    notePaperMartingaleEntry,
     syncPaperMartingaleFromLedger,
 } from '../services/paperMartingaleSync';
 import {
@@ -460,6 +461,14 @@ const postOrder = async (
                 eventSlug: trade.eventSlug,
             }
         );
+
+        if (
+            side === 'BUY' &&
+            filled.sizeUsd > 0 &&
+            COPY_STRATEGY_CONFIG.strategy === CopyStrategy.MARTINGALE
+        ) {
+            notePaperMartingaleEntry(trade.conditionId, trade.asset, filled.sizeUsd);
+        }
 
         Logger.warning(
             `[PAPER] Would ${condition.toUpperCase()} ` +
