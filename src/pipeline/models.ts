@@ -68,6 +68,8 @@ export const CandidateTrader =
 export interface CuratedTraderListDocument extends Document {
     _id: string;
     addresses: string[];
+    /** Wallets last written into USER_ADDRESSES by the pipeline (for merge/replace). */
+    appliedAddresses: string[];
     traders: Array<{
         address: string;
         rank: number;
@@ -88,6 +90,7 @@ const curatedSchema = new Schema(
     {
         _id: { type: String, required: true },
         addresses: { type: [String], default: [] },
+        appliedAddresses: { type: [String], default: [] },
         traders: {
             type: [
                 {

@@ -21,7 +21,9 @@ Keeps a live **top-50** list of successful Polymarket crypto up/down **5m** trad
    - 30d category metrics → PnL, ROI, win rate, volume
    - Recent activities → trades/day, active days/week, both-sides detection
 3. **Maintain** — keep wallets that pass gates; rank by score; write top 50.
-4. **Apply** (optional) — update `runtime_settings.values.USER_ADDRESSES`, sync Gravia webhook wallet filter, `POST` bot `/runtime/reload`.
+4. **Apply** (optional) — **merge** curated wallets into `runtime_settings.values.USER_ADDRESSES` (never wipe your manual list), sync Gravia webhook wallet filter, `POST` bot `/runtime/reload`.
+
+   Manual traders stay. Only wallets previously applied by the pipeline can rotate out when they fail gates.
 
 ### Inclusion gates
 

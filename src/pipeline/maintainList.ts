@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { PIPELINE } from './config';
 import { syncGraviaWalletFilter } from './graviaClient';
 import { evaluateTrader } from './evaluateTrader';
+import { mergeTraderLists, parseAddressList } from './mergeTraders';
 import {
     CandidateTrader,
     CuratedTraderList,
@@ -210,12 +211,37 @@ export async function runEvaluationCycle(): Promise<EvalCycleStats> {
     return stats;
 }
 
-async function applyCuratedToBot(addresses: string[]): Promise<{ ok: boolean; message: string }> {
-    const csv = addresses.join(',');
+async function readCurrentUserAddresses(): Promise<string[]> {
+    const db = mongoose.connection.db;
+    if (!db) return [];
+    const doc = (await db.collection('runtime_settings').findOne(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { _id: RUNTIME_SETTINGS_ID } as any
+    )) as { values?: { USER_ADDRESSES?: string } } | null;
+    return parseAddressList(doc?.values?.USER_ADDRESSES);
+}
+
+/**
+ * Merge pipeline curated wallets into the dashboard list.
+ * Manual traders are never removed; only previously pipeline-applied wallets can rotate out.
+ */
+async function applyCuratedToBot(pipelineAddresses: string[]): Promise<{ ok: boolean; message: string }> {
     const db = mongoose.connection.db;
     if (!db) return { ok: false, message: 'Mongo not connected' };
 
-    // runtime_settings._id is the string "overrides" (not ObjectId)
+    const curated = (await CuratedTraderList.findById(CURATED_LIST_ID)
+        .lean()
+        .exec()) as { appliedAddresses?: string[] } | null;
+
+    const current = await readCurrentUserAddresses();
+    const previousPipeline = curated?.appliedAddresses || [];
+    const { merged, added, removedPipeline, keptManual } = mergeTraderLists({
+        current,
+        previousPipeline,
+        nextPipeline: pipelineAddresses,
+    });
+
+    const csv = merged.join(',');
     await db.collection('runtime_settings').updateOne(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         { _id: RUNTIME_SETTINGS_ID } as any,
@@ -228,7 +254,7 @@ async function applyCuratedToBot(addresses: string[]): Promise<{ ok: boolean; me
         { upsert: true }
     );
 
-    const gravia = await syncGraviaWalletFilter(addresses);
+    const gravia = await syncGraviaWalletFilter(merged);
     let reloadMsg = 'reload skipped';
     if (PIPELINE.BOT_RELOAD_URL) {
         try {
@@ -246,9 +272,16 @@ async function applyCuratedToBot(addresses: string[]): Promise<{ ok: boolean; me
         }
     }
 
-    const message = `applied ${addresses.length} traders | ${gravia.message} | ${reloadMsg}`;
+    const message =
+        `merged traders=${merged.length} (manual=${keptManual.length}, pipeline=${pipelineAddresses.length}, ` +
+        `+${added.length}, -${removedPipeline.length} pipeline-only) | ${gravia.message} | ${reloadMsg}`;
+
     await CuratedTraderList.findByIdAndUpdate(CURATED_LIST_ID, {
-        $set: { lastApplyAt: new Date(), lastApplyMessage: message },
+        $set: {
+            appliedAddresses: parseAddressList(pipelineAddresses),
+            lastApplyAt: new Date(),
+            lastApplyMessage: message,
+        },
     });
     console.log(`[pipeline] ${message}`);
     return { ok: gravia.ok || !PIPELINE.GRAVIA_FEED_ENABLED, message };
