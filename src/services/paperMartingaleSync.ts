@@ -1,11 +1,10 @@
 /**
  * Paper-mode martingale: rebuild the recovery circle from bot_signals + CLOB marks.
+ * Auto-resolver is live-only, and live wallet positions must not drive the paper circle.
  *
- * Rules:
- * - Only confirmed resolved marks update the circle.
- * - Mid/last-trade of 0 is unknown (empty book), never a loss — prefer Gamma.
- * - One open bet at a time: block only while a *recent* paper BUY is still open
- *   (stale "open" from failed price fetches must not freeze trading forever).
+ * Resolution quality (from e359725):
+ * - Mid/last-trade of 0 is unknown (empty book), never a loss
+ * - Prefer Gamma; for aged entries accept extreme 0/1 even before `closed` flips
  */
 import { BotSignal } from '../models/botSignal';
 import {
@@ -17,53 +16,13 @@ import {
 
 const RESOLVED_HIGH = 0.99;
 const RESOLVED_LOW = 0.01;
-const SYNC_MIN_MS = 8_000;
+const SYNC_MIN_MS = 12_000;
 const FETCH_CONCURRENCY = 8;
-/** 5m crypto windows + buffer — older "open" rows never block the next entry. */
-const PENDING_MAX_AGE_SEC = 12 * 60;
-
-export interface MartingaleSyncResult extends MartingaleCircle {
-    /** Stake USD still open (unresolved) — next entry should wait. */
-    pendingOpenUsd: number;
-    pendingOpenCount: number;
-}
 
 let lastSyncAt = 0;
-let lastResult: MartingaleSyncResult | null = null;
-let inFlight: Promise<MartingaleSyncResult> | null = null;
+let inFlight: Promise<MartingaleCircle> | null = null;
 
-/** In-memory lock so we don't double-enter before the fill is in Mongo + marked open. */
-let localAwaiting: { key: string; sizeUsd: number; enteredAtMs: number } | null = null;
-
-const emptyResult = (): MartingaleSyncResult => ({
-    ...getMartingaleCircle(true),
-    pendingOpenUsd: 0,
-    pendingOpenCount: 0,
-});
-
-/** Call after a paper martingale BUY fill so the next consensus waits for settle. */
-export const notePaperMartingaleEntry = (
-    conditionId: string,
-    asset: string,
-    sizeUsd: number
-): void => {
-    if (!conditionId || !asset || !(sizeUsd > 0)) return;
-    localAwaiting = {
-        key: positionKey(conditionId, asset),
-        sizeUsd,
-        enteredAtMs: Date.now(),
-    };
-    // Invalidate throttle so the next size call sees pending immediately
-    lastSyncAt = 0;
-    if (lastResult) {
-        lastResult = {
-            ...lastResult,
-            pendingOpenCount: Math.max(1, lastResult.pendingOpenCount),
-            pendingOpenUsd: Math.max(sizeUsd, lastResult.pendingOpenUsd),
-        };
-    }
-};
-
+/** Valid mark: finite and strictly > 0 (reject empty-book zeros). */
 const parsePositivePrice = (raw: unknown): number | null => {
     const n = Number(raw);
     if (!Number.isFinite(n) || n <= 0) return null;
@@ -172,10 +131,15 @@ const mapPool = async <T, R>(
     return results;
 };
 
-export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleSyncResult> => {
+/**
+ * Rebuild paper consecutive-loss streak + cumulative lost USD from resolved ledger entries.
+ * Throttled so consensus bursts don't hammer the CLOB.
+ * Open/unresolved rows are omitted from the circle (no entry gate).
+ */
+export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleCircle> => {
     const now = Date.now();
-    if (now - lastSyncAt < SYNC_MIN_MS && lastResult && !inFlight) {
-        return lastResult;
+    if (now - lastSyncAt < SYNC_MIN_MS && !inFlight) {
+        return getMartingaleCircle(true);
     }
     if (inFlight) return inFlight;
 
@@ -217,21 +181,13 @@ export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleSyncRes
             }
 
             if (unique.length === 0) {
-                localAwaiting = null;
-                const result: MartingaleSyncResult = {
-                    consecutiveLosses: 0,
-                    cumulativeLossUsd: 0,
-                    pendingOpenUsd: 0,
-                    pendingOpenCount: 0,
-                };
                 rebuildMartingaleFromResolvedMarks([], true);
-                lastResult = result;
                 lastSyncAt = Date.now();
-                return result;
+                return getMartingaleCircle(true);
             }
 
             const prices = await mapPool(unique, FETCH_CONCURRENCY, async (row) => {
-                const ageSec = row.createdAt > 0 ? nowSec - row.createdAt : PENDING_MAX_AGE_SEC + 1;
+                const ageSec = row.createdAt > 0 ? nowSec - row.createdAt : 0;
                 const forceExtreme = ageSec > 6 * 60;
                 const gamma = await fetchGammaPrice(row.conditionId, row.asset, forceExtreme);
                 if (gamma != null) return gamma;
@@ -244,31 +200,14 @@ export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleSyncRes
                 curPrice: number;
                 sizeUsd: number;
             }> = [];
-            let pendingOpenUsd = 0;
-            let pendingOpenCount = 0;
-            let staleOpenCount = 0;
-
+            let openCount = 0;
             for (let i = 0; i < unique.length; i++) {
                 const price = prices[i];
                 const status = classifyMark(price);
-                const ageSec =
-                    unique[i].createdAt > 0 ? nowSec - unique[i].createdAt : PENDING_MAX_AGE_SEC + 1;
-
                 if (status === 'open') {
-                    // Only recent opens block the next entry
-                    if (ageSec >= 0 && ageSec <= PENDING_MAX_AGE_SEC) {
-                        pendingOpenCount++;
-                        pendingOpenUsd += unique[i].sizeUsd;
-                    } else {
-                        staleOpenCount++;
-                    }
+                    openCount++;
                     continue;
                 }
-
-                if (localAwaiting && localAwaiting.key === unique[i].key) {
-                    localAwaiting = null;
-                }
-
                 resolvedRows.push({
                     conditionId: unique[i].conditionId,
                     asset: unique[i].asset,
@@ -277,40 +216,21 @@ export const syncPaperMartingaleFromLedger = async (): Promise<MartingaleSyncRes
                 });
             }
 
-            // Local fill not yet visible as open/resolved in ledger
-            if (localAwaiting) {
-                const ageMs = Date.now() - localAwaiting.enteredAtMs;
-                if (ageMs > PENDING_MAX_AGE_SEC * 1000) {
-                    localAwaiting = null;
-                } else if (pendingOpenCount === 0) {
-                    pendingOpenCount = 1;
-                    pendingOpenUsd = localAwaiting.sizeUsd;
-                }
-            }
-
             const circle = rebuildMartingaleFromResolvedMarks(resolvedRows, true);
-            const result: MartingaleSyncResult = {
-                ...circle,
-                pendingOpenUsd,
-                pendingOpenCount,
-            };
             console.log(
                 `🎲 Paper martingale rebuild: streak=${circle.consecutiveLosses} ` +
                     `recover=$${circle.cumulativeLossUsd.toFixed(2)} ` +
-                    `pending=${pendingOpenCount} ($${pendingOpenUsd.toFixed(2)}) ` +
-                    `resolved=${resolvedRows.length}` +
-                    (staleOpenCount > 0 ? ` staleOpen=${staleOpenCount}` : '')
+                    `(resolved ${resolvedRows.length}, open/unknown ${openCount})`
             );
-            lastResult = result;
             lastSyncAt = Date.now();
-            return result;
+            return circle;
         } catch (error) {
             console.warn(
                 `Paper martingale sync failed: ${
                     error instanceof Error ? error.message : String(error)
                 }`
             );
-            return lastResult ?? emptyResult();
+            return getMartingaleCircle(true);
         } finally {
             inFlight = null;
         }

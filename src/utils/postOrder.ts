@@ -15,12 +15,12 @@ import {
     getPaperPosition,
     hasOpenPaperPosition,
 } from '../services/paperPositions';
-import { getMartingaleCircle, syncMartingaleFromPrices } from '../services/martingaleState';
 import {
-    MartingaleSyncResult,
-    notePaperMartingaleEntry,
-    syncPaperMartingaleFromLedger,
-} from '../services/paperMartingaleSync';
+    getMartingaleCircle,
+    MartingaleCircle,
+    syncMartingaleFromPrices,
+} from '../services/martingaleState';
+import { syncPaperMartingaleFromLedger } from '../services/paperMartingaleSync';
 import {
     ceilToTick,
     computeHedgeArbPlan,
@@ -170,26 +170,18 @@ const resolveMartingaleCircle = async (
         avgPrice?: number;
         sizeUsd?: number;
     }>
-): Promise<MartingaleSyncResult> => {
+): Promise<MartingaleCircle> => {
     if (COPY_STRATEGY_CONFIG.strategy !== CopyStrategy.MARTINGALE) {
-        return {
-            consecutiveLosses: 0,
-            cumulativeLossUsd: 0,
-            pendingOpenUsd: 0,
-            pendingOpenCount: 0,
-        };
+        return { consecutiveLosses: 0, cumulativeLossUsd: 0 };
     }
     // Paper: rebuild streak + lost USD from bot_signals + CLOB marks (never live wallet)
     if (ENV.PAPER_MODE) {
         return syncPaperMartingaleFromLedger();
     }
-    // Live: escalate only from confirmed resolved marks (no pending gate on other holdings)
     if (positions?.length) {
-        const circle = syncMartingaleFromPrices(positions, false);
-        return { ...circle, pendingOpenUsd: 0, pendingOpenCount: 0 };
+        return syncMartingaleFromPrices(positions, false);
     }
-    const circle = getMartingaleCircle(false);
-    return { ...circle, pendingOpenUsd: 0, pendingOpenCount: 0 };
+    return getMartingaleCircle(false);
 };
 
 const slippageFraction = (): number => {
@@ -408,21 +400,6 @@ const postOrder = async (
                   : 10000;
         const paperPos = getPaperPosition(trade.asset);
         const martingaleCircle = await resolveMartingaleCircle();
-        // Classic martingale: wait for the previous bet to resolve before the next entry
-        if (
-            side === 'BUY' &&
-            COPY_STRATEGY_CONFIG.strategy === CopyStrategy.MARTINGALE &&
-            martingaleCircle.pendingOpenCount > 0
-        ) {
-            Logger.warning(
-                `[PAPER] Skip martingale BUY — ${martingaleCircle.pendingOpenCount} open ` +
-                    `($${martingaleCircle.pendingOpenUsd.toFixed(2)}) still unresolved; ` +
-                    `wait for settle before next recovery step ` +
-                    `(streak ${martingaleCircle.consecutiveLosses}, recover $${martingaleCircle.cumulativeLossUsd.toFixed(2)})`
-            );
-            await UserActivity.updateOne({ _id: trade._id }, { bot: true, botExcutedTime: 1 });
-            return { executed: false, sizeUsd: 0, paper: true };
-        }
         const orderSize = calculateOrderSize(
             COPY_STRATEGY_CONFIG,
             trade.usdcSize,
@@ -461,14 +438,6 @@ const postOrder = async (
                 eventSlug: trade.eventSlug,
             }
         );
-
-        if (
-            side === 'BUY' &&
-            filled.sizeUsd > 0 &&
-            COPY_STRATEGY_CONFIG.strategy === CopyStrategy.MARTINGALE
-        ) {
-            notePaperMartingaleEntry(trade.conditionId, trade.asset, filled.sizeUsd);
-        }
 
         Logger.warning(
             `[PAPER] Would ${condition.toUpperCase()} ` +

@@ -128,10 +128,10 @@ export function CopyStrategySection({
           <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
             <h4 className="font-medium text-sm">Martingale Settings</h4>
             <p className="text-xs text-muted-foreground">
-              Each circle starts at base shares (Polymarket minimum is usually 5). Only one open bet
-              at a time — the next entry waits until the previous market resolves. After a loss, the
-              next stake is sized so a win at the new entry price recovers all lost USD and still
-              nets one base profit. After a win, the circle resets. Capped by Max Order Size.
+              Each circle starts at base shares (Polymarket minimum is usually 5). After a resolved
+              loss, the next stake is sized so a win at the new entry price recovers all lost USD
+              and still nets one base profit. After a win, the circle resets. Leader size ignored;
+              still capped by Max Order Size.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
