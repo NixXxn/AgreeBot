@@ -16,6 +16,8 @@ interface TradersSectionProps {
 export function TradersSection({ traders, traderLabels, onChange }: TradersSectionProps) {
   const [newTrader, setNewTrader] = useState('');
   const [error, setError] = useState('');
+  const [pruneLoading, setPruneLoading] = useState(false);
+  const [pruneMessage, setPruneMessage] = useState<string | null>(null);
 
   const handleAdd = () => {
     const candidates = parseTraderListInput(newTrader);
@@ -86,6 +88,49 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
     URL.revokeObjectURL(url);
   };
 
+  const handleRemoveWithoutFills = async () => {
+    if (traders.length === 0) return;
+    setPruneLoading(true);
+    setPruneMessage(null);
+    setError('');
+    try {
+      const res = await fetch('/api/traders/without-fills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ traders }),
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to find wallets without fills');
+      }
+      const without: string[] = Array.isArray(data.withoutFills) ? data.withoutFills : [];
+      if (without.length === 0) {
+        setPruneMessage('Every wallet already has at least one fill — nothing to remove.');
+        return;
+      }
+      if (
+        !window.confirm(
+          `Remove ${without.length} wallet${without.length === 1 ? '' : 's'} with no fills?\n\n` +
+            `These addresses never appeared on an entered bot trade. Click Save afterwards to persist.`
+        )
+      ) {
+        return;
+      }
+      const drop = new Set(without.map((a) => a.toLowerCase()));
+      const kept = traders.filter((a) => !drop.has(a.toLowerCase()));
+      onChange(kept);
+      setPruneMessage(
+        `Removed ${without.length} wallet${without.length === 1 ? '' : 's'} without fills ` +
+          `(${kept.length} remaining). Click Save to apply.`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove wallets without fills');
+    } finally {
+      setPruneLoading(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
@@ -96,14 +141,24 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
             or a comma-separated list.
           </CardDescription>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExport}
-          disabled={traders.length === 0}
-        >
-          Export
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRemoveWithoutFills}
+            disabled={traders.length === 0 || pruneLoading}
+          >
+            {pruneLoading ? 'Checking…' : 'Remove wallets without fills'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={traders.length === 0}
+          >
+            Export
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
@@ -170,6 +225,11 @@ export function TradersSection({ traders, traderLabels, onChange }: TradersSecti
           {traders.length} trader{traders.length !== 1 ? 's' : ''} configured ·
           commas, spaces, newlines, or a JSON array all work
         </p>
+        {pruneMessage && (
+          <p className="text-xs text-muted-foreground border-l-2 border-primary/40 pl-2">
+            {pruneMessage}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
